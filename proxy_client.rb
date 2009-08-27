@@ -26,7 +26,11 @@ class ProxyClient
         oper, port = cmd[0], cmd[1..-1].to_i
         if oper == ?C
           begin
-            proxies[port] = Proxy.new(@host, @port, @local, @local_port)
+            puts "Proxying from #{@local}:#{local_port} to #{@host}:#{@port}"
+            source = TCPSocket.new(@host, @port)
+            dest = TCPSocket.new(@local, @local_port)
+            
+            proxies[port] = Proxy.new(source, dest)
           rescue
             puts $!
             puts $!.backtrace.join("\n")
