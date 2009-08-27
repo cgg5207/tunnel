@@ -11,6 +11,7 @@
 require 'socket'
 require 'proxy'
 require 'thread'
+require 'timeout'
 
 if ARGV.length < 1
   puts "Usage: proxy_server <port>"
@@ -18,13 +19,18 @@ if ARGV.length < 1
 end
 
 class CommandSocket
-  @@next_port = 9000
-  @@mutex = Mutex.new
+  attr_reader :port
   
-  def initialize(command)
+  @@socket_queue = Queue.new
+  
+  def initialize(command, server, port)
     @command = command
     @proxies = Hash.new
+    @available_proxies = Array.new
     @active = true
+    @index = 0
+    @port = port
+    @server = server
   end
   
   def create_proxy(port)
@@ -32,59 +38,111 @@ class CommandSocket
     @proxy = TCPServer.new(port)
   end
 
+  def send_client_connect(index)
+    puts "Asking client to connect to #{index}"
+    unless @command.write("C%06d\n" % index)
+      shutdown
+      raise "Write failed, shutting down"
+    end
+  end
+
   def accept
     client = @proxy.accept
 
-    port = nil
-    @@mutex.synchronize do 
-      port = @@next_port
-      @@next_port = 9000 + (@@next_port - 8999) % 1000
+    if proxy = @available_proxies.pop
+      proxy.reset_dest(client)
+      send_client_connect(proxy.index)
+    else
+      @index += 1
+
+      source = nil
+      Timeout::timeout(20) do
+        send_client_connect(@index)
+        source = @@socket_queue.pop
+      end
+      @proxies[@index] = Proxy.new(source, client, self, @index)
     end
-    server = TCPServer.new(port)
-    
-    puts "Asking client to connect to #{port}"
-    unless @command.write("C%06d\n" % port)
-      puts "Write failed, shutting down"
-      shutdown
-      return
-    end
-    
-    dest = server.accept
-    puts "Proxying #{client.addr.inspect} to #{dest.addr.inspect}"
-    @proxies[port] = Proxy.new(client, dest)
+
+
+  rescue IOError
+    puts "Server socket closed for #{@port}"
 
   rescue
-    puts $!
-    puts $!.backtrace.join
-
+    puts $!, $!.class
+    puts $!.backtrace.join("\n")
     shutdown
   end
 
-  def handle
-    Thread.new do
-      while @active
-        begin
-          b = @command.read(1)
-          shutdown if b.length.nil?
-        rescue
-          shutdown
+  def add_socket(sock)
+    @@socket_queue << sock
+  end
+
+  def shutdown_remote(proxy)
+    if @active
+      puts "Proxy #{proxy.index} shut down dest socket"
+      @command.write("S%06d\n" % proxy.index)
+      @available_proxies << proxy
+    end
+  end
+
+  def run
+    @cmd_thread = Thread.new do
+      begin
+        while @active
+          cmd = @command.read(8)
+          puts "Received command '#{cmd}'"
+          if cmd.nil? or cmd.length == 0
+            shutdown
+            break
+          end
+          
+          if cmd =~ /[CS]\d+\n/
+            puts "Received command #{cmd}"
+            oper, ind = cmd[0], cmd[1..-1].to_i
+            
+            if oper == ?S
+              proxy = @proxies[ind]
+              proxy.shutdown_dest if proxy
+            end
+          end
+          
         end
+      rescue
       end
+      
+      shutdown
+      puts "Exiting command thread"
     end
     
-    Thread.new do
+    @accept = Thread.new do
       while @active
         accept
       end
+
+      puts "Exiting accept thread"
     end
   end
 
   def shutdown
-    puts "Shutting down #{@command.addr.inspect} for port #{@port}"
+    return unless @active
     
     @active = false
-    @proxy.shutdown
+
+    puts "In shutdown..."
+    @server.remove_client(self)
+    
+    puts "Shutting down #{@command.addr.inspect} for port #{@port}"
+    @command.shutdown rescue puts "Command: #{$!}"
+    @proxy.close rescue puts "Proxy: #{$!}"
     @proxies.values.each { |p| p.shutdown }
+
+    @accept.kill unless Thread.current == @accept
+    @cmd_thread.kill unless Thread.current == @cmd_thread
+
+    puts "#{@port} is now shutdown"
+  rescue
+    puts $!, $!.class
+    puts $!.backtrace.join("\n")
   end
 end
 
@@ -100,21 +158,38 @@ class Server
     while true
       puts "Waiting on #{@port}"
       s = @server.accept
-      cmd = CommandSocket.new(s)
-      port = s.read(8)
-      if port !~ /\d{7,7}\n/
-        puts "bad connection requet: #{port.inspect}"
+      cmd = s.read(8)
+      puts "Received command #{cmd}"
+      if cmd !~ /[CP]\d{6}\n/
+          puts "bad connection request: #{port.inspect}"
       else
-        if port.nil? or port.to_i < 1025
-          puts "Received bad port: #{port}"
-          next
-        end
+        oper, port = cmd[0], cmd[1..-1].to_i
+        if oper == ?C
+          if port.nil? or port.to_i < 1025
+            puts "Received bad port: #{port}"
+            next
+          end
 
-        puts "Creating proxy server on port #{port.to_i}"
-        cmd.create_proxy(port.to_i)
-        cmd.handle
+          puts "Creating proxy server on port #{port.to_i}"
+          client = CommandSocket.new(s, self, port)
+          @clients[port] = client
+          client.create_proxy(port.to_i)
+          client.run
+        elsif oper == ?P
+          client = @clients[port]
+          if client
+            client.add_socket(s)
+          else
+            puts "Could not find client for #{port}"
+          end
+        end
       end
     end
+  end
+
+  def remove_client(client)
+    puts "Removing client #{client.port}"
+    @clients.delete(client.port)
   end
 end
 
