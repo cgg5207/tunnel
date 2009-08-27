@@ -1,0 +1,45 @@
+
+require 'socket'
+require 'proxy'
+
+if ARGV.length < 5
+  puts "Usage: proxy_client <remote_host> <remote_port> <remote_url_port> <local_host> <local_port> "
+  exit 999
+end
+
+
+# Connect to server
+command = TCPSocket.new(ARGV[0], ARGV[1].to_i)
+command.write("%07d\n" % ARGV[2].to_i)
+proxies = Hash.new
+
+while cmd = command.read(8)
+  if cmd =~ /[CS]\d+\n/
+    puts "Received command #{cmd}"
+    
+    oper, port = cmd[0], cmd[1..-1].to_i
+    if oper == ?C
+      begin
+        puts "Proxying from #{ARGV[3]}:#{ARGV[4]} to #{ARGV[0]}:#{port}"
+        source = TCPSocket.new(ARGV[0], port.to_i)
+        dest = TCPSocket.new(ARGV[3], ARGV[4].to_i)
+        
+        proxies[port] = Proxy.new(source, dest)
+      rescue
+        puts $!
+        puts $!.backtrace.join("\n")
+      end
+    elsif oper == ?S
+      proxy = proxies[port]
+      if proxy
+        proxy.shutdown
+        proxies.delete(port)
+      end
+    end
+  else
+    puts "Received bad command: #{cmd}"
+    
+    # Try to recover
+    while command.read(1) != "\n"; end
+  end
+end
