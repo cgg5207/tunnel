@@ -57,7 +57,7 @@ class ProxyClient
             puts "Connection refused, sending terminator"
             @command.write("S%06d\n" % proxy.index)
             #proxy.send_terminator
-            proxy.flush_source
+            proxy.pull_thread
 
           rescue
             begin

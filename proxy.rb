@@ -28,7 +28,7 @@ class Proxy
     stopped = false
     begin
       data = nil
-      while @dest and !@shutting_down and IO.select([@source])
+      while !@shutting_down and IO.select([@source])
         begin
           block = @source.read_nonblock(512)
           unless block and !block.empty?
@@ -49,9 +49,7 @@ class Proxy
             next if data.index(?~)
           end
 
-          break unless @dest
-          
-          @dest.write(data)
+          @dest.write(data) if @dest
           data = nil
           
           break if stopped
@@ -61,14 +59,14 @@ class Proxy
         end
       end
     
-      puts "Pull loop terminated"
-      
     rescue Errno::EPIPE, EOFError, Errno::ECONNRESET
       puts "Pull: socket closed"
     rescue
       puts $!, $!.class
       puts $!.backtrace.join("\n")
     end
+
+    puts "Pull loop terminated"
     
     shutdown if !stopped
 
@@ -94,14 +92,14 @@ class Proxy
         end
       end
       
-      puts "Push terminated"
-      
     rescue Errno::EPIPE, EOFError, Errno::ECONNRESET
       puts "Push: Socket closed"
     rescue
       puts $!, $!.class
       puts $!.backtrace.join("\n")
     end
+
+    puts "Push terminated"
     
     send_terminator
     shutdown_dest
