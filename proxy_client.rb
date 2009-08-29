@@ -33,34 +33,36 @@ class ProxyClient
       while cmd = @command.read(8)
         puts "Received command #{cmd}"
         
-        dest = source = nil
+        dest = source = proxy = nil
         oper, ind = cmd[0], cmd[1..-1].to_i
         case oper
         when ?C
           begin
-            if proxy = @proxies[ind]
-              puts "Recycling old proxy: #{ind}"
-              dest = TCPSocket.new(@local, @local_port)
-              proxy.reset_dest(dest)
-            else
+            if (proxy = @proxies[ind]).nil?
               puts "Proxying(#{ind}) from #{@local}:#{@local_port} to #{@server}:#{@port}"
               source = TCPSocket.new(@server, @port)
               source.write("P%06d\n" % @remote_port)
               
+              proxy = @proxies[ind] = Proxy.new(source, self, ind)
               dest = TCPSocket.new(@local, @local_port)
-              @proxies[ind] = Proxy.new(source, dest, self, ind)
+            else
+              puts "Recycling old proxy: #{ind}"
+              dest = TCPSocket.new(@local, @local_port)
             end
             
+            proxy.dest = dest
+
+          rescue Errno::ECONNREFUSED
+            proxy.send_terminator
+
           rescue
             begin
               source.shutdown if source
               dest.shutdown if dest
             rescue
             end
-            if Errno::ECONNREFUSED === $1
-              puts $!, $!.class
-              puts $!.backtrace.join("\n")
-            end
+            puts $!, $!.class
+            puts $!.backtrace.join("\n")
           end
           
         when ?S
@@ -90,10 +92,6 @@ class ProxyClient
   end
 
   def shutdown_remote(proxy)
-    puts "Proxy #{proxy.index} shut down dest socket, sending S"
-    @command.write("S%06d\n" % proxy.index)
-  rescue
-    puts "#{$!}: ...ignoring error"
   end
 end
 

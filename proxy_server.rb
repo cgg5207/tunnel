@@ -57,19 +57,18 @@ class CommandSocket
     client = @proxy.accept
 
     if proxy = @available_proxies.pop
-      proxy.reset_dest(client)
       send_client_connect(proxy.index)
     else
       @index += 1
-
       source = nil
       Timeout::timeout(20) do
         send_client_connect(@index)
         source = @@socket_queue.pop
       end
-      @proxies[@index] = Proxy.new(source, client, self, @index)
+      proxy = @proxies[@index] = Proxy.new(source, self, @index)
     end
 
+    proxy.dest = client
 
   rescue IOError
     puts "Server socket closed for #{@port}"
@@ -86,8 +85,6 @@ class CommandSocket
 
   def shutdown_remote(proxy)
     if @active
-      puts "Proxy #{proxy.index} shut down dest socket"
-      @command.write("S%06d\n" % proxy.index)
       @available_proxies << proxy
     end
   end
@@ -106,11 +103,6 @@ class CommandSocket
           if cmd =~ /[CS]\d+\n/
             puts "Received command #{cmd}"
             oper, ind = cmd[0], cmd[1..-1].to_i
-            
-            if oper == ?S
-              proxy = @proxies[ind]
-              # proxy.shutdown_dest if proxy
-            end
           end
           
         end
