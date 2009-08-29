@@ -111,8 +111,10 @@ class CommandSocket
           end
           
         end
+      rescue Errno::ECONNRESET
+        puts "Client disconnected: #{@command.addr.inspect}"
       rescue
-        puts $!, $!.backtrace.join("\n")
+        puts $!, $!.class, $!.backtrace.join("\n")
       end
       
       shutdown

@@ -56,7 +56,6 @@ class ProxyClient
           rescue Errno::ECONNREFUSED
             puts "Connection refused, sending terminator"
             @command.write("S%06d\n" % proxy.index)
-            #proxy.send_terminator
             proxy.pull_thread
 
           rescue

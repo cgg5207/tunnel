@@ -30,13 +30,13 @@ class Proxy
       data = nil
       while !@shutting_down and IO.select([@source])
         begin
-          block = @source.read_nonblock(512)
+          block = @source.read_nonblock(1024)
+          puts "Pull received: #{block.length}"
           unless block and !block.empty?
             puts "read returned no data"
             break
           end
           
-          # puts "Received #{r.addr[2]}: #{block.length}"
           data ||= ''
           data << block
           next if data.length < TERM_LENGTH
@@ -79,7 +79,8 @@ class Proxy
     begin
       while @dest and !@shutting_down and IO.select([@dest])
         begin
-          data = @dest.read_nonblock(512)
+          data = @dest.read_nonblock(1024)
+          puts "Push received: #{data.length}"
           unless data and !data.empty?
             puts "read returned no data"
             break
