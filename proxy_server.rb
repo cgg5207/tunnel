@@ -27,6 +27,7 @@ class CommandSocket
   
   def initialize(command, server, port)
     @command = command
+    @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
     @proxies = Hash.new
     @available_proxies = Array.new
     @active = true
@@ -84,9 +85,7 @@ class CommandSocket
   end
 
   def shutdown_remote(proxy)
-    if @active
-      @available_proxies << proxy
-    end
+    @available_proxies << proxy if @active
   end
 
   def run
@@ -94,19 +93,26 @@ class CommandSocket
       begin
         while @active
           cmd = @command.read(8)
-          puts "Received command '#{cmd}'"
           if cmd.nil? or cmd.length == 0
             shutdown
             break
           end
           
-          if cmd =~ /[CS]\d+\n/
-            puts "Received command #{cmd}"
-            oper, ind = cmd[0], cmd[1..-1].to_i
+          puts "Received command #{cmd}"
+          oper, ind = cmd[0], cmd[1..-1].to_i
+          case oper
+          when ?S
+            puts "returing #{ind} to available pool"
+            proxy = @proxies[ind]
+            proxy.shutdown_dest
+            
+          else
+            puts "Received invalid command #{oper}"
           end
           
         end
       rescue
+        puts $!, $!.backtrace.join("\n")
       end
       
       shutdown
@@ -130,7 +136,7 @@ class CommandSocket
     puts "In shutdown..."
     @server.remove_client(self)
     
-    puts "Shutting down #{@command.addr.inspect} for port #{@port}"
+    puts "Shutting down for port #{@port}"
     @command.shutdown rescue puts "Command: #{$!}"
     @proxy.close rescue puts "Proxy: #{$!}"
     @proxies.values.each { |p| p.shutdown }

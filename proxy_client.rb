@@ -20,6 +20,7 @@ class ProxyClient
       begin
         puts "Opening connect to server #{@server} on #{@port}"
         @command = TCPSocket.new(@server, @port)
+        @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
         @command.write("C%06d\n" % @remote_port)
       rescue
         puts $!
@@ -49,11 +50,14 @@ class ProxyClient
               puts "Recycling old proxy: #{ind}"
               dest = TCPSocket.new(@local, @local_port)
             end
-            
+
             proxy.dest = dest
 
           rescue Errno::ECONNREFUSED
-            proxy.send_terminator
+            puts "Connection refused, sending terminator"
+            @command.write("S%06d\n" % proxy.index)
+            #proxy.send_terminator
+            proxy.flush_source
 
           rescue
             begin
@@ -65,10 +69,6 @@ class ProxyClient
             puts $!.backtrace.join("\n")
           end
           
-        when ?S
-          proxy = @proxies[ind]
-          # proxy.shutdown_dest if proxy
-
         when ?F
           puts "Could not bind to port #{@remote_port}, already in use - try another port"
           puts "Exiting..."

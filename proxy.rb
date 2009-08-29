@@ -3,6 +3,8 @@ require 'thread'
 
 class Proxy
   attr_reader :index, :source, :dest
+
+  @@mutex = Mutex.new
   
   def set_options(sock)
     sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
@@ -22,69 +24,96 @@ class Proxy
   TERM_LENGTH = TERMINATOR.length
   TERM_RE = Regexp.new(Regexp.quote(TERMINATOR))
 
-  def create_threads
-    @threads = [[@source, @dest], [@dest, @source]].map do |r, w|
-      Thread.new do
+  def pull_thread
+    stopped = false
+    begin
+      data = nil
+      while @dest and !@shutting_down and IO.select([@source])
         begin
+          block = @source.read_nonblock(512)
+          unless block and !block.empty?
+            puts "read returned no data"
+            break
+          end
+          
+          # puts "Received #{r.addr[2]}: #{block.length}"
+          data ||= ''
+          data << block
+          next if data.length < TERM_LENGTH
+          
+          if data =~ TERM_RE
+            puts "Received terminator... stopping"
+            stopped = true
+            data = $`
+          else
+            next if data.index(?~)
+          end
+
+          break unless @dest
+          
+          @dest.write(data)
           data = nil
-          while @dest and !@shutting_down and IO.select([r])
-            begin
-              block = r.read_nonblock(512)
-              unless block and !block.empty?
-                puts "read returned no data"
-                break
-              end
-              
-              # puts "Received #{r.addr[2]}: #{block.length}"
-              if r == @source
-                data ||= ''
-                data << block
-                next if data.length < TERM_LENGTH
+          
+          break if stopped
 
-                if data =~ TERM_RE
-                  puts "Received terminator... stopping"
-                  stopped = true
-                  data = $`
-                else
-                  next if data.index(?~)
-                end
-              else
-                data = block
-              end
-
-              w.write(data)
-              data = nil
-              
-              break if stopped
-              
-            rescue Errno::EAGAIN, Errno::EWOULDBLOCK
-              puts "EAGAIN"
-            end
-          end
-
-          puts "Read loop terminated"
-
-        rescue Errno::EPIPE, EOFError, Errno::ECONNRESET
-          puts "Socket closed"
-        rescue
-          puts $!, $!.class
-          puts $!.backtrace.join("\n")
-        end
-
-        begin
-          if r == @source and !stopped
-            shutdown
-          elsif w == @source
-            send_terminator
-            shutdown_dest
-          end
-
-        rescue
-          puts $!, $!.class
-          puts $!.backtrace.join("\n")
+        rescue Errno::EAGAIN, Errno::EWOULDBLOCK
+          puts "EAGAIN"
         end
       end
+    
+      puts "Pull loop terminated"
+      
+    rescue Errno::EPIPE, EOFError, Errno::ECONNRESET
+      puts "Pull: socket closed"
+    rescue
+      puts $!, $!.class
+      puts $!.backtrace.join("\n")
     end
+    
+    shutdown if !stopped
+
+  rescue
+    puts $!, $!.class
+    puts $!.backtrace.join("\n")
+  end
+
+  def push_thread
+    begin
+      while @dest and !@shutting_down and IO.select([@dest])
+        begin
+          data = @dest.read_nonblock(512)
+          unless data and !data.empty?
+            puts "read returned no data"
+            break
+          end
+          
+          @source.write(data)
+          
+        rescue Errno::EAGAIN, Errno::EWOULDBLOCK
+          puts "EAGAIN"
+        end
+      end
+      
+      puts "Push terminated"
+      
+    rescue Errno::EPIPE, EOFError, Errno::ECONNRESET
+      puts "Push: Socket closed"
+    rescue
+      puts $!, $!.class
+      puts $!.backtrace.join("\n")
+    end
+    
+    send_terminator
+    shutdown_dest
+    
+  rescue
+    puts $!, $!.class
+    puts $!.backtrace.join("\n")
+  end
+
+  def create_threads
+    @threads = [Thread.new { push_thread },
+                Thread.new { pull_thread }]
   end
 
   def kill_threads
@@ -110,6 +139,8 @@ class Proxy
       raise "Can't set dest when one is already present"
     end
 
+    puts "Setting dest to: #{dest}"
+
     @dest = dest
     set_options(@dest)
     create_threads
@@ -118,7 +149,7 @@ class Proxy
 
   def shutdown
     unless @shutting_down
-      puts "Shutting down proxy for #{self.index} #{@source.addr.inspect}"
+      puts "Shutting down proxy for #{self.index}"
       @shutting_down = true
       @source.shutdown rescue
       if @dest
@@ -136,22 +167,26 @@ class Proxy
     puts $!.backtrace.join("\n")
   end
 
+  def flush_source
+    puts "Flushing source..."
+    while data = @source.read_nonblock(512)
+      puts data.inspect
+    end
+  rescue Errno::EAGAIN, Errno::EWOULDBLOCK, EOFError
+  end
+
   def shutdown_dest
-    if @dest and !@shutting_down
-      puts "Shutting down destination #{@dest.addr.inspect}, source still connected"
-      dest, @dest = @dest, nil
-      dest.shutdown rescue
-
-      puts "Flushing source..."
-      begin
-        while data = @source.read_nonblock(512)
-          puts data.inspect
-        end
-      rescue Errno::EAGAIN, Errno::EWOULDBLOCK
+    @@mutex.synchronize do 
+      if @dest and !@shutting_down
+        puts "Shutting down destination #{self.index}, source still connected"
+        dest, @dest = @dest, nil
+        dest.shutdown rescue
+        
+        flush_source
+        
+        puts "Shutdown dest calling delegate for #{self.index}"
+        @delegate.shutdown_remote(self)
       end
-
-      puts "Shutdown dest calling delegate for #{self.index}"
-      @delegate.shutdown_remote(self)
     end
 
       
