@@ -18,6 +18,8 @@ if ARGV.length < 1
   exit 999
 end
 
+STDOUT.sync = true
+
 class CommandSocket
   attr_reader :port
   
@@ -35,7 +37,12 @@ class CommandSocket
   
   def create_proxy(port)
     @port = port
-    @proxy = TCPServer.new(port)
+    @proxy = TCPServer.new('127.0.0.1', port)
+    true
+  rescue
+    puts $!
+    puts "Cannot create server port"
+    false
   end
 
   def send_client_connect(index)
@@ -102,7 +109,7 @@ class CommandSocket
             
             if oper == ?S
               proxy = @proxies[ind]
-              proxy.shutdown_dest if proxy
+              # proxy.shutdown_dest if proxy
             end
           end
           
@@ -111,7 +118,7 @@ class CommandSocket
       end
       
       shutdown
-      puts "Exiting command thread"
+      puts "Exiting command thread for #{@port}"
     end
     
     @accept = Thread.new do
@@ -172,9 +179,14 @@ class Server
 
           puts "Creating proxy server on port #{port.to_i}"
           client = CommandSocket.new(s, self, port)
-          @clients[port] = client
-          client.create_proxy(port.to_i)
-          client.run
+          if client.create_proxy(port.to_i)
+            @clients[port] = client
+            client.run
+          else
+            puts "Could not create proxy server"
+            s.write("F0000001\n")
+            s.shutdown
+          end
         elsif oper == ?P
           client = @clients[port]
           if client
