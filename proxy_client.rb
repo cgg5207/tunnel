@@ -55,8 +55,16 @@ class ProxyClient
 
           rescue Errno::ECONNREFUSED
             puts "Connection refused, sending terminator"
+            proxy.send_terminator
             @command.write("S%06d\n" % proxy.index)
             proxy.pull_thread
+
+          rescue Proxy::DestError
+            puts $!
+            puts "Shutting down proxy and retying"
+            proxy.shutdown
+            @proxies[ind] = nil
+            retry
 
           rescue
             begin

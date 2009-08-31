@@ -24,6 +24,7 @@ class CommandSocket
   attr_reader :port
   
   @@socket_queue = Queue.new
+  @@shutdown_mutex = Mutex.new
   
   def initialize(command, server, port)
     @command = command
@@ -57,22 +58,32 @@ class CommandSocket
   def accept
     client = @proxy.accept
 
-    if proxy = @available_proxies.pop
-      send_client_connect(proxy.index)
-    else
-      @index += 1
-      source = nil
-      Timeout::timeout(20) do
-        send_client_connect(@index)
-        source = @@socket_queue.pop
+    begin
+      if proxy = @available_proxies.pop
+        send_client_connect(proxy.index)
+      else
+        @index += 1
+        source = nil
+        Timeout::timeout(20) do
+          send_client_connect(@index)
+          source = @@socket_queue.pop
+        end
+        proxy = @proxies[@index] = Proxy.new(source, self, @index)
       end
-      proxy = @proxies[@index] = Proxy.new(source, self, @index)
+      
+      proxy.dest = client
+      
+    rescue Proxy::DestError
+      puts $!
+      puts "Shutting down proxy and retying"
+      proxy.shutdown
+      @proxies[proxy.index] = nil
+      retry
+      
+    rescue IOError
+      puts "Server socket closed for #{@port}"
+      shutdown
     end
-
-    proxy.dest = client
-
-  rescue IOError
-    puts "Server socket closed for #{@port}"
 
   rescue
     puts $!, $!.class
@@ -126,14 +137,15 @@ class CommandSocket
         accept
       end
 
-      puts "Exiting accept thread"
+      puts "Exiting accept thread for #{@port}"
     end
   end
 
   def shutdown
-    return unless @active
-    
-    @active = false
+    @@shutdown_mutex.synchronize do 
+      return unless @active
+      @active = false
+    end
 
     puts "In shutdown..."
     @server.remove_client(self)

@@ -5,6 +5,9 @@ class Proxy
   attr_reader :index, :source, :dest
 
   @@mutex = Mutex.new
+
+  class DestError < StandardError
+  end
   
   def set_options(sock)
     sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
@@ -25,12 +28,12 @@ class Proxy
   TERM_RE = Regexp.new(Regexp.quote(TERMINATOR))
 
   def pull_thread
-    stopped = false
     begin
+      stopped = false
       data = nil
-      while !@shutting_down and IO.select([@source])
+      while !stopped and !@shutting_down and IO.select([@source])
         begin
-          block = @source.read_nonblock(1024)
+          block = @source.read_nonblock(1440)
           puts "Pull received: #{block.length}"
           unless block and !block.empty?
             puts "read returned no data"
@@ -52,8 +55,6 @@ class Proxy
           @dest.write(data) if @dest
           data = nil
           
-          break if stopped
-
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
           puts "EAGAIN"
         end
@@ -79,12 +80,18 @@ class Proxy
     begin
       while @dest and !@shutting_down and IO.select([@dest])
         begin
-          data = @dest.read_nonblock(1024)
-          puts "Push received: #{data.length}"
+          data = nil
+          @@mutex.synchronize do
+            break unless @dest
+            data = @dest.read_nonblock(1440)
+          end
+          
           unless data and !data.empty?
             puts "read returned no data"
             break
           end
+          
+          puts "Push received: #{data.length}"
           
           @source.write(data)
           
@@ -125,9 +132,11 @@ class Proxy
   end
 
   def send_terminator
-    puts "Writing terminator..."
-    @source.write(TERMINATOR)
-    @source.flush
+    @@mutex.synchronize do 
+      puts "Writing terminator..."
+      @source.write(TERMINATOR)
+      @source.flush
+    end
             
   rescue Errno::ESHUTDOWN
     puts "Socket already closed"
@@ -135,7 +144,7 @@ class Proxy
 
   def dest=(dest)
     if @dest
-      raise "Can't set dest when one is already present"
+      raise DestError, "Can't set dest when one is already present"
     end
 
     puts "Setting dest to: #{dest}"
@@ -147,20 +156,22 @@ class Proxy
   
 
   def shutdown
-    unless @shutting_down
-      puts "Shutting down proxy for #{self.index}"
+    @@mutex.synchronize do 
+      return if @shutting_down
       @shutting_down = true
+    end
+
+    puts "Shutting down proxy for #{self.index}"
       @source.shutdown rescue
-      if @dest
-        begin
-          @dest.shutdown
-        rescue
-        end
+    if @dest
+      begin
+        @dest.shutdown
+      rescue
       end
-      
-      @delegate.shutdown_remote(self)
     end
     
+    @delegate.shutdown_remote(self)
+
   rescue
     puts $!
     puts $!.backtrace.join("\n")
@@ -168,27 +179,31 @@ class Proxy
 
   def flush_source
     puts "Flushing source..."
-    while data = @source.read_nonblock(512)
+    while data = @source.read_nonblock(1440)
       puts data.inspect
     end
   rescue Errno::EAGAIN, Errno::EWOULDBLOCK, EOFError
   end
 
   def shutdown_dest
+    dest = nil
     @@mutex.synchronize do 
-      if @dest and !@shutting_down
-        puts "Shutting down destination #{self.index}, source still connected"
-        dest, @dest = @dest, nil
-        dest.shutdown rescue
-        
-        flush_source
-        
-        puts "Shutdown dest calling delegate for #{self.index}"
-        @delegate.shutdown_remote(self)
-      end
+      return if @dest.nil? or @shutting_down
+      puts "Shutting down destination #{self.index}, source still connected"
+      dest, @dest = @dest, nil
     end
 
-      
+    begin
+      dest.shutdown
+    rescue
+      puts "shutting down dest: #{$!}", $!.class
+    end
+    
+    flush_source
+    
+    puts "Shutdown dest calling delegate for #{self.index}"
+    @delegate.shutdown_remote(self)
+    
   rescue Errno::ENOTCONN, Errno::ESHUTDOWN
     # puts "Ignoring not connected"
     puts $!, $!.class
