@@ -3,8 +3,7 @@ require 'thread'
 
 class Proxy
   attr_reader :index, :source, :dest
-
-  @@mutex = Mutex.new
+  attr_accessor :source_ready
 
   class DestError < StandardError
   end
@@ -19,6 +18,9 @@ class Proxy
       source, delegate, index
     @shutting_down = false
     @dest = nil
+    @source_ready = @terminated = false
+
+    @mutex = Mutex.new
 
     set_options(@source)
   end
@@ -34,9 +36,9 @@ class Proxy
       while !stopped and !@shutting_down and IO.select([@source])
         begin
           block = @source.read_nonblock(1440)
-          puts "Pull received: #{block.length}"
+          # puts "Pull received: #{block.length}"
           unless block and !block.empty?
-            puts "read returned no data"
+            # puts "#{@index}: read returned no data"
             break
           end
           
@@ -45,7 +47,7 @@ class Proxy
           next if data.length < TERM_LENGTH
           
           if data =~ TERM_RE
-            puts "Received terminator... stopping"
+            # puts "#{@index}: Received terminator... stopping"
             stopped = true
             data = $`
           else
@@ -60,16 +62,19 @@ class Proxy
         end
       end
     
-    rescue Errno::EPIPE, EOFError, Errno::ECONNRESET
-      puts "Pull: socket closed"
+    rescue Errno::EPIPE, Errno::ECONNRESET, EOFError
+      puts $!, $!.class
+      # puts "#{@index}: Pull: socket closed"
+
     rescue
       puts $!, $!.class
       puts $!.backtrace.join("\n")
     end
 
-    puts "Pull loop terminated"
+    # puts "#{@index}: Pull loop terminated"
     
     shutdown if !stopped
+    shutdown_dest
 
   rescue
     puts $!, $!.class
@@ -81,35 +86,37 @@ class Proxy
       while @dest and !@shutting_down and IO.select([@dest])
         begin
           data = nil
-          @@mutex.synchronize do
+          # puts "#{@index}: push_thread Waiting for mutex"
+          @mutex.synchronize do
             break unless @dest
+            # puts "#{@index}: Reading data..."
             data = @dest.read_nonblock(1440)
+            # puts "#{@index}: Read data..."
           end
           
           unless data and !data.empty?
-            puts "read returned no data"
+            # puts "#{@index}: read returned no data"
             break
           end
           
-          puts "Push received: #{data.length}"
+          #puts "#{@index}: Push received: #{data.length}"
           
           @source.write(data)
           
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
-          puts "EAGAIN"
+          puts "#{@index}: EAGAIN"
         end
       end
       
     rescue Errno::EPIPE, EOFError, Errno::ECONNRESET
-      puts "Push: Socket closed"
+      # puts "#{@index}: Push: Socket closed"
     rescue
       puts $!, $!.class
       puts $!.backtrace.join("\n")
     end
 
-    puts "Push terminated"
+    # puts "#{@index}: Push terminated"
     
-    send_terminator
     shutdown_dest
     
   rescue
@@ -131,38 +138,47 @@ class Proxy
     end
   end
 
-  def send_terminator
-    @@mutex.synchronize do 
-      puts "Writing terminator..."
-      @source.write(TERMINATOR)
-      @source.flush
+  def send_terminator(force = false)
+    # puts "#{@index}: send_terminator: Waiting for mutex"
+    @mutex.synchronize do
+      return if @terminated and !force
+      @terminated = true
     end
+    
+    # puts "#{@index}: Writing terminator..."
+    @source.write(TERMINATOR)
+    @source.flush
             
   rescue Errno::ESHUTDOWN
     puts "Socket already closed"
   end
 
   def dest=(dest)
-    if @dest
-      raise DestError, "Can't set dest when one is already present"
+    @mutex.synchronize do
+      if @dest
+        raise DestError, "#{@index}: Can't set dest when one is already present"
+      end
+      # puts "#{@index}: Setting dest to: #{dest}"
+      @dest = dest
     end
 
-    puts "Setting dest to: #{dest}"
+    @source_ready = false
+    @terminated = false
 
-    @dest = dest
     set_options(@dest)
     create_threads
   end
   
 
   def shutdown
-    @@mutex.synchronize do 
+    # puts "#{@index}: shutdown waiting for mutex"
+    @mutex.synchronize do 
       return if @shutting_down
       @shutting_down = true
     end
 
-    puts "Shutting down proxy for #{self.index}"
-      @source.shutdown rescue
+    # puts "#{@index}: Shutting down proxy for #{self.index}"
+    @source.shutdown rescue
     if @dest
       begin
         @dest.shutdown
@@ -170,38 +186,41 @@ class Proxy
       end
     end
     
-    @delegate.shutdown_remote(self)
-
   rescue
     puts $!
     puts $!.backtrace.join("\n")
   end
 
   def flush_source
-    puts "Flushing source..."
+    # puts "#{@index}: Flushing source..."
     while data = @source.read_nonblock(1440)
-      puts data.inspect
+      puts "Flushed: #{data.inspect}" if data != TERMINATOR
     end
   rescue Errno::EAGAIN, Errno::EWOULDBLOCK, EOFError
   end
 
   def shutdown_dest
     dest = nil
-    @@mutex.synchronize do 
+    # puts "#{@index}: shutdown_dest waiting for mutex"
+    @mutex.synchronize do 
       return if @dest.nil? or @shutting_down
-      puts "Shutting down destination #{self.index}, source still connected"
+      # puts "#{@index}: Shutting down destination #{self.index}, source still connected"
       dest, @dest = @dest, nil
     end
 
+
     begin
+      send_terminator
       dest.shutdown
+    rescue Errno::ENOTCONN, Errno::ESHUTDOWN
+      # Ignore
     rescue
-      puts "shutting down dest: #{$!}", $!.class
+      puts "#{@index}: shutting down dest: #{$!}", $!.class
     end
     
     flush_source
     
-    puts "Shutdown dest calling delegate for #{self.index}"
+    # puts "#{@index}: Shutdown dest calling delegate for #{self.index}"
     @delegate.shutdown_remote(self)
     
   rescue Errno::ENOTCONN, Errno::ESHUTDOWN

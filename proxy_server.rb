@@ -8,6 +8,8 @@
 # outgoing connection to the server and begins to receive data forwarding it to the
 # local destination. Results are then proxied back to the originator.
 
+Dir.chdir(File.dirname(__FILE__))
+
 require 'socket'
 require 'proxy'
 require 'thread'
@@ -21,20 +23,26 @@ end
 STDOUT.sync = true
 
 class CommandSocket
-  attr_reader :port
+  attr_reader :port, :remote_addr
   
   @@socket_queue = Queue.new
   @@shutdown_mutex = Mutex.new
   
   def initialize(command, server, port)
     @command = command
-    @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
+    @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)
+    @remote_addr = @command.peeraddr[3]
     @proxies = Hash.new
     @available_proxies = Array.new
     @active = true
     @index = 0
     @port = port
     @server = server
+    @mutex = Mutex.new
+  end
+
+  def same_peer?(sock)
+    @remote_addr == sock.peeraddr[3]
   end
   
   def create_proxy(port)
@@ -48,7 +56,7 @@ class CommandSocket
   end
 
   def send_client_connect(index)
-    puts "Asking client to connect to #{index}"
+    # puts "Asking client to connect to #{index}"
     unless @command.write("C%06d\n" % index)
       shutdown
       raise "Write failed, shutting down"
@@ -59,7 +67,11 @@ class CommandSocket
     client = @proxy.accept
 
     begin
-      if proxy = @available_proxies.pop
+      proxy = nil
+      @mutex.synchronize do
+        proxy = @available_proxies.pop
+      end
+      if proxy
         send_client_connect(proxy.index)
       else
         @index += 1
@@ -96,7 +108,14 @@ class CommandSocket
   end
 
   def shutdown_remote(proxy)
-    @available_proxies << proxy if @active
+    @mutex.synchronize do
+      if proxy.dest
+        raise "Can't add proxy when dest is set!"
+      end
+      if proxy.source_ready and !@available_proxies.include?(proxy) and @active
+        @available_proxies << proxy
+      end
+    end
   end
 
   def run
@@ -109,13 +128,19 @@ class CommandSocket
             break
           end
           
-          puts "Received command #{cmd}"
+          # puts "Received command #{cmd}"
           oper, ind = cmd[0], cmd[1..-1].to_i
           case oper
           when ?S
             puts "returing #{ind} to available pool"
             proxy = @proxies[ind]
-            proxy.shutdown_dest
+            @mutex.synchronize do
+              if proxy.dest.nil?
+                @available_proxies << proxy unless @available_proxies.include?(proxy)
+              else
+                proxy.source_ready = true              
+              end
+            end
             
           else
             puts "Received invalid command #{oper}"
@@ -147,7 +172,6 @@ class CommandSocket
       @active = false
     end
 
-    puts "In shutdown..."
     @server.remove_client(self)
     
     puts "Shutting down for port #{@port}"
@@ -174,11 +198,11 @@ class Server
   end
   
   def accept
+    puts "Waiting on #{@port}"
     while true
-      puts "Waiting on #{@port}"
       s = @server.accept
       cmd = s.read(8)
-      puts "Received command #{cmd}"
+      # puts "Received command #{cmd}"
       if cmd !~ /[CP]\d{6}\n/
           puts "bad connection request: #{port.inspect}"
       else
@@ -189,19 +213,32 @@ class Server
             next
           end
 
-          puts "Creating proxy server on port #{port.to_i}"
-          client = CommandSocket.new(s, self, port)
-          if client.create_proxy(port.to_i)
-            @clients[port] = client
-            client.run
-          else
-            puts "Could not create proxy server"
-            s.write("F0000001\n")
-            s.shutdown
-          end
-        elsif oper == ?P
           client = @clients[port]
           if client
+            if client.same_peer?(s)
+              client.shutdown
+              sleep 1
+            else
+              puts "Could not create proxy server"
+              s.write("F0000001\n")
+              s.shutdown
+            end
+          else
+            # puts "Creating proxy server on port #{port.to_i}"
+            client = CommandSocket.new(s, self, port)
+            if client.create_proxy(port.to_i)
+              @clients[port] = client
+              client.run
+            else
+              puts "Could not create proxy server"
+              s.write("F0000001\n")
+              s.shutdown
+            end
+          end
+          
+        elsif oper == ?P
+          client = @clients[port]
+          if client and client.same_peer?(s)
             client.add_socket(s)
           else
             puts "Could not find client for #{port}"
