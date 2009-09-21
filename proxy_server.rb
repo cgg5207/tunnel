@@ -87,13 +87,13 @@ class CommandSocket
       
     rescue Proxy::DestError
       puts $!
-      puts "Shutting down proxy and retying"
+      puts "#{@port}: Shutting down proxy and retying"
       proxy.shutdown
       @proxies[proxy.index] = nil
       retry
       
     rescue IOError
-      puts "Server socket closed for #{@port}"
+      puts "#{@port}: Server socket closed"
       shutdown
     end
 
@@ -110,7 +110,7 @@ class CommandSocket
   def shutdown_remote(proxy)
     @mutex.synchronize do
       if proxy.dest
-        raise "Can't add proxy when dest is set!"
+        raise "#{@port}: Can't add proxy when dest is set!"
       end
       if proxy.source_ready and !@available_proxies.include?(proxy) and @active
         @available_proxies << proxy
@@ -132,7 +132,7 @@ class CommandSocket
           oper, ind = cmd[0], cmd[1..-1].to_i
           case oper
           when ?S
-            puts "returing #{ind} to available pool"
+            puts "#{@port}: returing #{ind} to available pool"
             proxy = @proxies[ind]
             @mutex.synchronize do
               if proxy.dest.nil?
@@ -143,18 +143,18 @@ class CommandSocket
             end
             
           else
-            puts "Received invalid command #{oper}"
+            puts "#{@port}: Received invalid command #{oper}"
           end
           
         end
       rescue Errno::ECONNRESET
-        puts "Client disconnected: #{@command.addr.inspect}"
+        puts "#{@port}: Client disconnected: #{@command.addr.inspect}"
       rescue
         puts $!, $!.class, $!.backtrace.join("\n")
       end
       
       shutdown
-      puts "Exiting command thread for #{@port}"
+      puts "#{@port}: Exiting command thread for #{@port}"
     end
     
     @accept = Thread.new do
@@ -162,19 +162,19 @@ class CommandSocket
         accept
       end
 
-      puts "Exiting accept thread for #{@port}"
-    end
-  end
-
-  def shutdown
-    @@shutdown_mutex.synchronize do 
-      return unless @active
-      @active = false
-    end
-
-    @server.remove_client(self)
-    
-    puts "Shutting down for port #{@port}"
+      puts "#{@port}: Exiting accept thread "
+    end                                    
+  end                                      
+                                           
+  def shutdown                             
+    @@shutdown_mutex.synchronize do        
+      return unless @active                
+      @active = false                      
+    end                                    
+                                           
+    @server.remove_client(self)            
+                                           
+    puts " #{@port}: hutting down" 
     @command.shutdown rescue puts "Command: #{$!}"
     @proxy.close rescue puts "Proxy: #{$!}"
     @proxies.values.each { |p| p.shutdown }
