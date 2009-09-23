@@ -1,6 +1,7 @@
 
 require 'socket'
 require 'proxy'
+require 'timeout'
 
 STDOUT.sync = true
 
@@ -20,8 +21,10 @@ class ProxyClient
   def run
     while true
       begin
-        puts "Opening connect to server #{@server} on #{@port}"
-        @command = TCPSocket.new(@server, @port)
+        Timeout::timeout(10) do
+          puts "Opening connect to server #{@server} on #{@port}"
+          @command = TCPSocket.new(@server, @port)
+        end
         @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
         @command.write("C%06d\n" % @remote_port)
       rescue

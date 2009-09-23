@@ -18,6 +18,7 @@ class Proxy
       source, delegate, index
     @shutting_down = false
     @dest = nil
+    @start = nil
     @source_ready = @terminated = false
 
     @mutex = Mutex.new
@@ -169,8 +170,13 @@ class Proxy
     create_threads
   end
   
-
+  def start
+    @start = Time.now
+  end
+  
   def shutdown
+    puts "#{@index}: Active #{@start - Time.now} seconds" if @start
+    
     # puts "#{@index}: shutdown waiting for mutex"
     @mutex.synchronize do 
       return if @shutting_down
@@ -200,6 +206,8 @@ class Proxy
   end
 
   def shutdown_dest
+    puts "#{@index}: #{Time.now - @start} seconds" if @start
+    
     dest = nil
     # puts "#{@index}: shutdown_dest waiting for mutex"
     @mutex.synchronize do 

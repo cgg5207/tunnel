@@ -86,6 +86,7 @@ class CommandSocket
 
       puts "#{@port}: Connecting proxy for #{proxy.index}"
 
+      proxy.start
       proxy.dest = client
 
     rescue Proxy::DestError
@@ -207,7 +208,7 @@ class Server
       cmd = s.read(8)
       # puts "Received command #{cmd}"
       if cmd !~ /[CP]\d{6}\n/
-          puts "bad connection request: #{port.inspect}"
+          puts "bad connection request: #{cmd.inspect}"
       else
         oper, port = cmd[0], cmd[1..-1].to_i
         if oper == ?C
