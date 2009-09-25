@@ -65,6 +65,7 @@ class CommandSocket
     begin
       proxy = nil
       @mutex.synchronize do
+        puts "#{@port}: #{@available_proxies.length} proxies available"
         proxy = @available_proxies.pop
       end
       if proxy
@@ -136,6 +137,7 @@ class CommandSocket
             @mutex.synchronize do
               if proxy.dest.nil?
                 @available_proxies << proxy unless @available_proxies.include?(proxy)
+                puts "#{@port}: #{@available_proxies.length} proxies now available"
               else
                 proxy.source_ready = true
               end

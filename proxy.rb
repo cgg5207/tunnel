@@ -92,8 +92,11 @@ class Proxy
     puts $!.backtrace.join("\n")
 
   ensure
-    shutdown if !stopped
-    shutdown_write
+    if !stopped
+      shutdown
+    else
+      shutdown_write
+    end
   end
 
   def push_thread
@@ -119,7 +122,7 @@ class Proxy
         end
       end
       
-    rescue Errno::EPIPE, EOFError, Errno::ECONNRESET, Errno::ENOTSOCK
+    rescue Errno::EPIPE, EOFError, Errno::ECONNRESET, Errno::ENOTSOCK, IOError
       puts "#{@index}: Push: Socket closed\n#{$!.backtrace[0]}\n#{$!}\n2#{$!.class}" if VERBOSE
       
     rescue
@@ -194,17 +197,27 @@ class Proxy
       @shutting_down = true
     end
 
-    puts "#{@index}: Shutting down proxy for #{self.index}" if VERBOSE
-    @source.close rescue
     if @dest
       begin
+        puts "#{@index}: Closing dest socket: #{$!}" if VERBOSE
         @dest.close
-      rescue
+      rescue Exception
+        puts "#{@index}: Destination cannot be closed: #{$!}"
       end
+    else
+      puts "#{@index}: Cannot close socket, dest is nil!" if VERBOSE
+    end
+
+    begin
+      puts "#{@index}: Closing source" if VERBOSE
+      @source.close
+    rescue
+      puts "#{@index}: Source cannot be closed: #{$!}"
     end
     
   rescue
-    puts $!
+    puts "Shutdown failed..."
+    puts $!, $!.class
     puts $!.backtrace.join("\n")
   end
 
@@ -216,17 +229,7 @@ class Proxy
   rescue Errno::EAGAIN, Errno::EWOULDBLOCK, EOFError
   end
 
-  def increment_close_count
-    count = nil
-    @mutex.synchronize do 
-      count = (@close_count += 1)
-    end
-    count
-  end
-
   def shutdown_read
-    puts "#{@index}: shutting down read side of proxy" if VERBOSE
-
     count = dest = nil
     @mutex.synchronize do 
       return if @dest.nil? or @shutting_down
@@ -235,6 +238,7 @@ class Proxy
       count = (@close_count += 1)
     end
 
+    puts "#{@index}: shutting down read side of proxy" if VERBOSE
     begin
       dest.close_read
     rescue Errno::ENOTCONN, Errno::ESHUTDOWN
@@ -255,11 +259,12 @@ class Proxy
     count = dest = nil
     @mutex.synchronize do 
       return if @dest.nil? or @shutting_down
-      puts "#{@index}: Shutting down write" if VERBOSE
       dest = @dest
       count = (@close_count += 1)
     end
 
+    puts "#{@index}: Shutting down write" if VERBOSE
+    
     dest.flush
     dest.close_write
 
