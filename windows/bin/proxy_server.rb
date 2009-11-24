@@ -43,7 +43,7 @@ class CommandSocket
 
   def create_proxy(port)
     @port = port
-    @proxy = TCPServer.new('127.0.0.1', port)
+    @proxy = TCPServer.new(port)
     true
   rescue
     puts $!
@@ -134,13 +134,17 @@ class CommandSocket
           when ?S
             puts "#{@port}: returing #{ind} to available pool"
             proxy = @proxies[ind]
-            @mutex.synchronize do
-              if proxy.dest.nil?
-                @available_proxies << proxy unless @available_proxies.include?(proxy)
-                puts "#{@port}: #{@available_proxies.length} proxies now available"
-              else
-                proxy.source_ready = true
+            if proxy
+              @mutex.synchronize do
+                if proxy.dest.nil?
+                  @available_proxies << proxy unless @available_proxies.include?(proxy)
+                  puts "#{@port}: #{@available_proxies.length} proxies now available"
+                else
+                  proxy.source_ready = true
+                end
               end
+            else
+              puts "#{@port}: Could not find proxy: #{ind}"
             end
 
           else
@@ -201,9 +205,10 @@ class Server
   def accept
     puts "Waiting on #{@port}"
     while true
+      puts "Accepting..."
       s = @server.accept
       cmd = s.read(8)
-      # puts "Received command #{cmd}"
+      puts "Received command #{cmd}"
       if cmd !~ /[CP]\d{6}\n/
           puts "bad connection request: #{cmd.inspect}"
       else
