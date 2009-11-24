@@ -5,11 +5,6 @@ require 'timeout'
 
 STDOUT.sync = true
 
-if ARGV.length < 5
-  puts "Usage: proxy_client <remote_host> <remote_port> <remote_url_port> <local_host> <local_port> "
-  exit 999
-end
-
 class ProxyClient
   def initialize(server, port, remote_port, local_host, local_port)
     @server, @port, @remote_port, @local, @local_port =
@@ -116,6 +111,18 @@ class ProxyClient
     # puts "#{proxy.index}: Sending proxy disconnect"
     @command.write("S%06d\n" % proxy.index)
   end
+end
+
+if ARGV[0] == '-v'
+  VERBOSE = true
+  ARGV.shift
+else
+  VERBOSE = false
+end
+
+if ARGV.length < 5
+  puts "Usage: proxy_client <remote_host> <remote_port> <remote_url_port> <local_host> <local_port> "
+  exit 999
 end
 
 client = ProxyClient.new(ARGV[0], ARGV[1].to_i,

@@ -16,11 +16,6 @@ require 'proxy'
 require 'thread'
 require 'timeout'
 
-if ARGV.length < 1
-  puts "Usage: proxy_server <port>"
-  exit 999
-end
-
 STDOUT.sync = true
 
 class CommandSocket
@@ -70,6 +65,7 @@ class CommandSocket
     begin
       proxy = nil
       @mutex.synchronize do
+        puts "#{@port}: #{@available_proxies.length} proxies available"
         proxy = @available_proxies.pop
       end
       if proxy
@@ -141,6 +137,7 @@ class CommandSocket
             @mutex.synchronize do
               if proxy.dest.nil?
                 @available_proxies << proxy unless @available_proxies.include?(proxy)
+                puts "#{@port}: #{@available_proxies.length} proxies now available"
               else
                 proxy.source_ready = true
               end
@@ -256,6 +253,18 @@ class Server
     puts "Removing client #{client.port}"
     @clients.delete(client.port)
   end
+end
+
+if ARGV[0] == '-v'
+  VERBOSE = true
+  ARGV.shift
+else
+  VERBOSE = false
+end
+
+if ARGV.length < 1
+  puts "Usage: proxy_server <port>"
+  exit 999
 end
 
 server = Server.new(ARGV[0].to_i)

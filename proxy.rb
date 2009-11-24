@@ -252,7 +252,7 @@ class Proxy
   rescue
     puts "#{@index}: shutting down dest: #{$!}", $!.class
   ensure
-    shutdown_dest if count >= 2
+    shutdown_dest if count and count >= 2
   end
 
   def shutdown_write
@@ -273,7 +273,7 @@ class Proxy
   rescue
     puts "#{@index}: shutting down dest: #{$!}", $!.class
   ensure
-    shutdown_dest if count >= 2
+    shutdown_dest if count and count >= 2
   end
 
   def shutdown_dest

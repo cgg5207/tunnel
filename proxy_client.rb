@@ -20,8 +20,8 @@ class ProxyClient
           puts "Opening connect to server #{@server} on #{@port}"
           @command = TCPSocket.new(@server, @port)
         end
-        @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
-        @command.write("C%06d\n" % @remote_port)
+        p @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
+        p @command.write("C%06d\n" % @remote_port)
       rescue
         puts $!
         puts "Waiting 10 seconds and retrying"
