@@ -21,10 +21,17 @@ class Proxy
     @source_ready = @terminated = false
     @start = nil
     @close_count = 0
+    @pull_state = "NEW"
+    @push_state = "NEW"
+    @state = "NEW"
 
     @mutex = Mutex.new
 
     set_options(@source)
+  end
+
+  def to_s
+    "#{@index}: (#{@state}):(#{@pull_state} : #{@push_state})"
   end
 
   TERMINATOR = 0.chr * 5 + '1818df499987fab124fac0cfc9edb83fa5578c36'
@@ -38,6 +45,7 @@ class Proxy
       data = nil
       while !stopped and !@shutting_down and IO.select([@source])
         begin
+          @state = "READING"
           block = @source.read_nonblock(1440)
           puts "Pull received: #{block.length}" if VERBOSE
           unless block and !block.empty?
@@ -50,6 +58,7 @@ class Proxy
           next if data.length < TERM_LENGTH
           
           if data =~ TERM_RE
+            @pull_state = "LOOKING FOR TERM"
             puts "#{@index}: Received terminator... stopping"  if VERBOSE
             stopped = true
             data = $`
@@ -59,6 +68,7 @@ class Proxy
           end
           
           if @dest and data.length > 0
+            @pull_state = "WRITING"
             puts "#{@index}: pull Writing #{data.length} bytes"  if VERBOSE
             @dest.write(data) 
             puts "#{@index}: pull Wrote..."  if VERBOSE
@@ -84,7 +94,8 @@ class Proxy
       puts $!, $!.class
       puts $!.backtrace.join("\n")
     end
-    
+
+    @pull_state = "TERMINATED"
     puts "#{@index}: Pull loop terminated" if VERBOSE
     
   rescue
@@ -97,6 +108,7 @@ class Proxy
     else
       shutdown_write
     end
+    @pull_state = "SHUTDOWN"
   end
 
   def push_thread
@@ -104,17 +116,21 @@ class Proxy
       while @dest and !@shutting_down and IO.select([@dest])
         begin
           data = nil
+          @push_state = "WAITING FOR MUTEX"
           @mutex.synchronize do
             break unless @dest
+            @push_state = "READING"
             data = @dest.read_nonblock(1440)
           end
           
           unless data and !data.empty?
+            @push_state = "READING DONE"
             puts "#{@index}: read returned no data" if VERBOSE
             break
           end
           
           puts "#{@index}: Push received: #{data.length}" if VERBOSE
+          @push_state = "WRITING"
           @source.write(data)
           
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
@@ -123,13 +139,14 @@ class Proxy
       end
       
     rescue Errno::EPIPE, EOFError, Errno::ECONNRESET, Errno::ENOTSOCK, IOError
-      puts "#{@index}: Push: Socket closed\n#{$!.backtrace[0]}\n#{$!}\n2#{$!.class}" if VERBOSE
+      puts "#{@index}: Push: Socket closed\n#{$!.backtrace[0]}\n#{$!}\n#{$!.class}" if VERBOSE
       
     rescue
       puts $!, $!.class
       puts $!.backtrace.join("\n")
     end
-    
+
+    @push_state = "TERMINATED"    
     puts "#{@index}: Push terminated" if VERBOSE
     
   rescue
@@ -137,7 +154,9 @@ class Proxy
     puts $!.backtrace.join("\n")
     
   ensure
+    @push_state = "SHUTTING DOWN READ"    
     shutdown_read
+    @push_state = "SHUTDOWN"    
   end
   
   def create_threads
@@ -147,6 +166,7 @@ class Proxy
 
   def kill_threads
     if @threads
+      @push_state = @pull_state = "KILLING THREADS"
       @threads.each do |t|
         puts "#{@index}: Killing thread #{t.inspect}" if VERBOSE
         t.kill unless Thread.current == t
@@ -155,12 +175,14 @@ class Proxy
   end
 
   def send_terminator(force = false)
+    @push_state = "SENDING TERMINATOR"
     puts "#{@index}: send_terminator: Waiting for mutex" if VERBOSE
     @mutex.synchronize do
       return if @terminated and !force
       @terminated = true
     end
     
+    @push_state = "WRITING TERMINATOR"
     puts "#{@index}: Writing terminator..." if VERBOSE
     @source.write(TERMINATOR)
     @source.flush
@@ -170,11 +192,14 @@ class Proxy
   end
 
   def dest=(dest)
+    @pull_state = @push_state = "RESETTING DEST"
     @mutex.synchronize do
       if @dest
+        @pull_state = @push_state = "DEST ERROR"
         raise DestError, "#{@index}: Can't set dest when one is already present" if VERBOSE
       end
       # puts "#{@index}: Setting dest to: #{dest}"
+      @pull_state = @push_state = "DEST SET"
       @dest = dest
     end
 
@@ -182,7 +207,9 @@ class Proxy
     @terminated = false
     @close_count = 0
 
+    @state = "OPERATIONAL"
     set_options(@dest)
+    @pull_state = @push_state = "CREATING THREADS"
     create_threads
   end
   
@@ -225,12 +252,14 @@ class Proxy
     puts "#{@index}: Flushing source..." if VERBOSE
     while data = @source.read_nonblock(1440)
       puts "Flushed: #{data.inspect}" if data != TERMINATOR
+      break if data.empty?
     end
   rescue Errno::EAGAIN, Errno::EWOULDBLOCK, EOFError
   end
 
   def shutdown_read
     count = dest = nil
+    @push_state = "SHUTDOWN READ (waiting)"
     @mutex.synchronize do 
       return if @dest.nil? or @shutting_down
       puts "#{@index}: Shutting down read" if VERBOSE
@@ -240,11 +269,13 @@ class Proxy
 
     puts "#{@index}: shutting down read side of proxy" if VERBOSE
     begin
+      @push_state = "SHUTDOWN READ (closing)"
       dest.close_read
     rescue Errno::ENOTCONN, Errno::ESHUTDOWN
       puts "#{@index}: Close read: #{$!}" if VERBOSE
     end
     
+    @push_state = "SENDING TERMINATOR"
     send_terminator
 
   rescue Errno::ENOTCONN, Errno::ESHUTDOWN
@@ -257,6 +288,7 @@ class Proxy
 
   def shutdown_write
     count = dest = nil
+    @pull_state = "SHUTTING DOWN WRITE (wait)"
     @mutex.synchronize do 
       return if @dest.nil? or @shutting_down
       dest = @dest
@@ -265,6 +297,7 @@ class Proxy
 
     puts "#{@index}: Shutting down write" if VERBOSE
     
+    @pull_state = "SHUTTING DOWN WRITE (close)"
     dest.flush
     dest.close_write
 
@@ -280,13 +313,16 @@ class Proxy
     puts "#{@index}: Active #{Time.now - @start} seconds" if @start
     dest = nil
     # puts "#{@index}: shutdown_dest waiting for mutex"
+    @state = "SHUTDOWN - waiting"
     @mutex.synchronize do 
       return if @dest.nil? or @shutting_down
       puts "#{@index}: Shutting down destination, source still connected" if VERBOSE
       dest, @dest = @dest, nil
     end
 
+    @state = "SHUTDOWN - flushing"
     flush_source
     @delegate.shutdown_remote(self)
+    @state = "SHUTDOWN"
   end
 end

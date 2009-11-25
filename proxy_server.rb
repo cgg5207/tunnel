@@ -52,7 +52,7 @@ class CommandSocket
   end
 
   def send_client_connect(index)
-    # puts "Asking client to connect to #{index}"
+    puts "Asking client to connect to #{index}"
     unless @command.write("C%06d\n" % index)
       shutdown
       raise "Write failed, shutting down"
@@ -66,6 +66,8 @@ class CommandSocket
       proxy = nil
       @mutex.synchronize do
         puts "#{@port}: #{@available_proxies.length} proxies available"
+        puts "#{@port}: All: #{@proxies.values.join(',' )}"
+        puts "#{@port}: Available: #{@available_proxies.join(',' )}"
         proxy = @available_proxies.pop
       end
       if proxy
@@ -73,7 +75,7 @@ class CommandSocket
       else
         @index += 1
         source = nil
-        Timeout::timeout(20) do
+        Timeout::timeout(30) do
           send_client_connect(@index)
           source = @@socket_queue.pop
         end
@@ -110,10 +112,12 @@ class CommandSocket
   def shutdown_remote(proxy)
     @mutex.synchronize do
       if proxy.dest
-        raise "#{@port}: Can't add proxy when dest is set!"
+        raise "#{@port}: ********* Can't add proxy when dest is set! ********"
       end
       if proxy.source_ready and !@available_proxies.include?(proxy) and @active
         @available_proxies << proxy
+      else
+        raise "#{@port}: ********* Can't add proxy when !active #{@active} or !p.ready #{proxy.source_ready} ********"
       end
     end
   end
@@ -133,6 +137,7 @@ class CommandSocket
           case oper
           when ?S
             puts "#{@port}: returing #{ind} to available pool"
+            puts "#{@port}: #{@proxies.values.join(',' )}"
             proxy = @proxies[ind]
             if proxy
               @mutex.synchronize do
@@ -146,7 +151,6 @@ class CommandSocket
             else
               puts "#{@port}: Could not find proxy: #{ind}"
             end
-
           else
             puts "#{@port}: Received invalid command #{oper}"
           end
@@ -169,6 +173,8 @@ class CommandSocket
 
       puts "#{@port}: Exiting accept thread "
     end
+    
+    puts "Returning from run"
   end
 
   def shutdown
@@ -179,7 +185,7 @@ class CommandSocket
 
     @server.remove_client(self)
 
-    puts " #{@port}: hutting down"
+    puts " #{@port}: shutting down"
     @command.shutdown rescue puts "Command: #{$!}"
     @proxy.close rescue puts "Proxy: #{$!}"
     @proxies.values.each { |p| p.shutdown }
@@ -206,11 +212,35 @@ class Server
     puts "Waiting on #{@port}"
     while true
       puts "Accepting..."
-      s = @server.accept
-      cmd = s.read(8)
+      s = nil
+      begin
+        s = @server.accept_nonblock
+      rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
+        puts "Server blocked, trying again"
+        IO.select([@server])
+        retry
+      end
+      puts "Reading..."
+      cmd = ''
+      begin
+        while cmd.length < 8 
+          puts "Read nonblock"
+          cmd << s.read_nonblock(8 - cmd.length)
+          puts "CMD: #{cmd}"
+        end
+      rescue Errno::EAGAIN, Errno::EWOULDBLOCK
+        puts "CMD: #{$!}"
+        if IO.select([s], nil, nil, 5)  
+          retry
+        end
+      rescue
+        puts "Accept: #{$!}"
+      end
+
       puts "Received command #{cmd}"
       if cmd !~ /[CP]\d{6}\n/
-          puts "bad connection request: #{cmd.inspect}"
+        puts "bad connection request: #{cmd.inspect}"
+        s.close
       else
         oper, port = cmd[0], cmd[1..-1].to_i
         if oper == ?C
