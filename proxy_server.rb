@@ -66,8 +66,8 @@ class CommandSocket
       proxy = nil
       @mutex.synchronize do
         puts "#{@port}: #{@available_proxies.length} proxies available"
-        puts "#{@port}: All: #{@proxies.values.join(',' )}"
-        puts "#{@port}: Available: #{@available_proxies.join(',' )}"
+        # puts "#{@port}: All: #{@proxies.values.join(',' )}"
+        # puts "#{@port}: Available: #{@available_proxies.join(',' )}"
         proxy = @available_proxies.pop
       end
       if proxy
@@ -137,13 +137,13 @@ class CommandSocket
           case oper
           when ?S
             puts "#{@port}: returing #{ind} to available pool"
-            puts "#{@port}: #{@proxies.values.join(',' )}"
+            # puts "#{@port}: #{@proxies.values.join(',' )}"
             proxy = @proxies[ind]
             if proxy
               @mutex.synchronize do
                 if proxy.dest.nil?
                   @available_proxies << proxy unless @available_proxies.include?(proxy)
-                  puts "#{@port}: #{@available_proxies.length} proxies now available"
+                  # puts "#{@port}: #{@available_proxies.length} proxies now available"
                 else
                   proxy.source_ready = true
                 end
@@ -230,8 +230,10 @@ class Server
         end
       rescue Errno::EAGAIN, Errno::EWOULDBLOCK
         puts "CMD: #{$!}"
-        if IO.select([s], nil, nil, 5)  
+        if IO.select([s], nil, nil, 3)  
           retry
+        else
+          puts "Read timed out: #{s.peeraddr[3].inspect}"
         end
       rescue
         puts "Accept: #{$!}"
