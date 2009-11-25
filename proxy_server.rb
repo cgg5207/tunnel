@@ -223,7 +223,7 @@ class Server
           next
         end
       rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
-        puts "Server blocked, trying again"
+        puts "Waiting for connection request"
         IO.select([@server])
         retry
       end
