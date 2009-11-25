@@ -18,6 +18,8 @@ require 'timeout'
 
 STDOUT.sync = true
 
+FILTER = {'::ffff:160.109.120.55' => true}
+
 class CommandSocket
   attr_reader :port, :remote_addr
 
@@ -215,6 +217,11 @@ class Server
       s = nil
       begin
         s = @server.accept_nonblock
+        if FILTER[s.peeraddr[3]]
+          puts "**** Filter out connection request from #{s.peeraddr[3]}"
+          s.close
+          next
+        end
       rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
         puts "Server blocked, trying again"
         IO.select([@server])
@@ -233,7 +240,7 @@ class Server
         if IO.select([s], nil, nil, 3)  
           retry
         else
-          puts "Read timed out: #{s.peeraddr[3].inspect}"
+          puts "Read timed out: #{s.peeraddr.inspect}"
         end
       rescue
         puts "Accept: #{$!}"
