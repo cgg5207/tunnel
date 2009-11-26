@@ -68,8 +68,10 @@ class CommandSocket
       proxy = nil
       @mutex.synchronize do
         puts "#{@port}: #{@available_proxies.length} proxies available"
-        #puts "#{@port}: All: #{@proxies.values.join(',' )}"
-        #puts "#{@port}: Available: #{@available_proxies.join(',' )}"
+        if VERBOSE
+          puts "#{@port}: All: #{@proxies.values.join(',' )}"
+          puts "#{@port}: Available: #{@available_proxies.join(',' )}"
+        end
         proxy = @available_proxies.pop
       end
       if proxy

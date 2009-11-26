@@ -83,9 +83,9 @@ class ProxyClient
             exit(999)
 
           when ?S
-            puts "Shutdown requestion on connection #{ind}"
+            puts "Shutdown request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
-              proxy.shutdown
+              proxy.shutdown_read
             else
               puts "Cannot find proxy for #{ind}"
             end          

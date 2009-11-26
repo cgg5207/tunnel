@@ -40,7 +40,7 @@ class Proxy
 
   def pull_thread
     begin
-      close_read = false 
+      write_closed = false 
       stopped = false
       data = nil
       while !stopped and !@shutting_down and IO.select([@source])
@@ -68,18 +68,20 @@ class Proxy
           end
           
           begin
-            if @dest and data.length > 0
+            if !write_closed and @dest and data.length > 0
               @pull_state = "WRITING"
               puts "#{@index}: pull Writing #{data.length} bytes"  if VERBOSE
               @dest.write(data) 
               puts "#{@index}: pull Wrote..."  if VERBOSE
               data = nil
+            elsif write_closed
+              data =  nil
             end
           rescue Errno::EPIPE
             @pull_state = "EPIPE"
             puts "#{@index}: Write closed, stopping pull"
-            # @delegate.terminate_remote(self)
-            stopped = true
+            @delegate.terminate_remote(self)
+            write_closed = true
           end
           
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
@@ -298,10 +300,10 @@ class Proxy
     @push_state = "SENDING TERMINATOR"
     send_terminator
 
-  rescue Errno::ENOTCONN, Errno::ESHUTDOWN
+  rescue Errno::ENOTCONN, Errno::ESHUTDOWN, Errno::IOError
     # Ignore
   rescue
-    puts "#{@index}: shutting down dest: #{$!}", $!.class
+    puts "#{@index}: shutting down read: #{$!}"
   ensure
     shutdown_dest if count and count >= 2
   end
@@ -321,10 +323,10 @@ class Proxy
     dest.flush
     dest.close_write
 
-  rescue Errno::ENOTCONN, Errno::ESHUTDOWN
+  rescue Errno::ENOTCONN, Errno::ESHUTDOWN, Errno::IOError
     # Ignore
   rescue
-    puts "#{@index}: shutting down dest: #{$!}", $!.class
+    puts "#{@index}: shutting down write: #{$!}"
   ensure
     shutdown_dest if count and count >= 2
   end
