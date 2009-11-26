@@ -18,7 +18,7 @@ require 'timeout'
 
 STDOUT.sync = true
 
-FILTER = {'::ffff:160.109.120.55' => true}
+FILTER = {}
 
 class CommandSocket
   attr_reader :port, :remote_addr
@@ -68,8 +68,8 @@ class CommandSocket
       proxy = nil
       @mutex.synchronize do
         puts "#{@port}: #{@available_proxies.length} proxies available"
-        # puts "#{@port}: All: #{@proxies.values.join(',' )}"
-        # puts "#{@port}: Available: #{@available_proxies.join(',' )}"
+        puts "#{@port}: All: #{@proxies.values.join(',' )}"
+        puts "#{@port}: Available: #{@available_proxies.join(',' )}"
         proxy = @available_proxies.pop
       end
       if proxy
@@ -116,10 +116,15 @@ class CommandSocket
       if proxy.dest
         raise "#{@port}: ********* Can't add proxy when dest is set! ********"
       end
-      if proxy.source_ready and !@available_proxies.include?(proxy) and @active
+      if proxy.source_ready and !proxy.dead and !@available_proxies.include?(proxy) and @active
         @available_proxies << proxy
       else
-        raise "#{@port}: ********* Can't add proxy when !active #{@active} or !p.ready #{proxy.source_ready} ********"
+        if proxy.dead
+          puts "#{@port}: Proxy is dead, remove it from list"
+          @proxies[proxy.index] = nil
+        else
+          puts "#{@port}: Souce ready? #{proxy.source_ready}"
+        end
       end
     end
   end
@@ -143,7 +148,7 @@ class CommandSocket
             proxy = @proxies[ind]
             if proxy
               @mutex.synchronize do
-                if proxy.dest.nil?
+                if proxy.dest.nil? and !proxy.dead
                   @available_proxies << proxy unless @available_proxies.include?(proxy)
                   # puts "#{@port}: #{@available_proxies.length} proxies now available"
                 else

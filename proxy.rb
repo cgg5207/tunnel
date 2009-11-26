@@ -2,8 +2,8 @@ require 'socket'
 require 'thread'
 
 class Proxy
-  attr_reader :index, :source, :dest, :active
-  attr_accessor :source_ready
+  attr_reader :index, :source, :dest, :dead
+  attr_accessor :source_ready, :terminated
 
   class DestError < StandardError
   end
@@ -18,7 +18,7 @@ class Proxy
       source, delegate, index
     @shutting_down = false
     @dest = nil
-    @source_ready = @terminated = false
+    @terminated = @source_ready = @dead = false
     @start = nil
     @close_count = 0
     @pull_state = "NEW"
@@ -45,7 +45,7 @@ class Proxy
       data = nil
       while !stopped and !@shutting_down and IO.select([@source])
         begin
-          @state = "READING"
+          @pull_state = "READING"
           block = @source.read_nonblock(1440)
           puts "Pull received: #{block.length}" if VERBOSE
           unless block and !block.empty?
@@ -205,6 +205,7 @@ class Proxy
 
     @source_ready = false
     @terminated = false
+    @dead = false
     @close_count = 0
 
     @state = "OPERATIONAL"
@@ -230,6 +231,8 @@ class Proxy
         @dest.close
       rescue Exception
         puts "#{@index}: Destination cannot be closed: #{$!}"
+      ensure
+        @dest = nil
       end
     else
       puts "#{@index}: Cannot close socket, dest is nil!" if VERBOSE
@@ -240,7 +243,13 @@ class Proxy
       @source.close
     rescue
       puts "#{@index}: Source cannot be closed: #{$!}"
+    ensure
+      @source = nil
     end
+    
+    @dead = true
+    @delegate.shutdown_remote(self)
+    @state = "DEAD"
     
   rescue
     puts "Shutdown failed..."
