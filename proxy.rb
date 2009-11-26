@@ -59,7 +59,7 @@ class Proxy
           
           if data =~ TERM_RE
             @pull_state = "LOOKING FOR TERM"
-            puts "#{@index}: Received terminator... stopping"  if VERBOSE
+            puts "#{@index}: Received terminator... stopping" if VERBOSE
             stopped = true
             data = $`
           elsif data.index(0.chr)
@@ -67,12 +67,19 @@ class Proxy
             next
           end
           
-          if @dest and data.length > 0
-            @pull_state = "WRITING"
-            puts "#{@index}: pull Writing #{data.length} bytes"  if VERBOSE
-            @dest.write(data) 
-            puts "#{@index}: pull Wrote..."  if VERBOSE
-            data = nil
+          begin
+            if @dest and data.length > 0
+              @pull_state = "WRITING"
+              puts "#{@index}: pull Writing #{data.length} bytes"  if VERBOSE
+              @dest.write(data) 
+              puts "#{@index}: pull Wrote..."  if VERBOSE
+              data = nil
+            end
+          rescue Errno::EPIPE
+            @pull_state = "EPIPE"
+            puts "#{@index}: Write closed, stopping pull"
+            # @delegate.terminate_remote(self)
+            stopped = true
           end
           
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
@@ -178,13 +185,17 @@ class Proxy
     @push_state = "SENDING TERMINATOR"
     puts "#{@index}: send_terminator: Waiting for mutex" if VERBOSE
     @mutex.synchronize do
-      return if @terminated and !force
+      if @terminated and !force
+        @push_state = "ALREADY TERMINATED"
+        return
+      end
       @terminated = true
     end
     
     @push_state = "WRITING TERMINATOR"
     puts "#{@index}: Writing terminator..." if VERBOSE
     @source.write(TERMINATOR)
+    @push_state = "FLUSHING SOURCE"
     @source.flush
             
   rescue Errno::ESHUTDOWN

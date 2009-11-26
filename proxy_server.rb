@@ -68,14 +68,17 @@ class CommandSocket
       proxy = nil
       @mutex.synchronize do
         puts "#{@port}: #{@available_proxies.length} proxies available"
-        puts "#{@port}: All: #{@proxies.values.join(',' )}"
-        puts "#{@port}: Available: #{@available_proxies.join(',' )}"
+        #puts "#{@port}: All: #{@proxies.values.join(',' )}"
+        #puts "#{@port}: Available: #{@available_proxies.join(',' )}"
         proxy = @available_proxies.pop
       end
       if proxy
         send_client_connect(proxy.index)
       else
         @index += 1
+        if @index > 50
+          shutdown
+        end
         source = nil
         Timeout::timeout(30) do
           send_client_connect(@index)
@@ -117,16 +120,23 @@ class CommandSocket
         raise "#{@port}: ********* Can't add proxy when dest is set! ********"
       end
       if proxy.source_ready and !proxy.dead and !@available_proxies.include?(proxy) and @active
+        puts "#{@port}: (#{proxy.index}) Adding to available pool"
         @available_proxies << proxy
       else
         if proxy.dead
-          puts "#{@port}: Proxy is dead, remove it from list"
+          puts "#{@port}: (#{proxy.index}) Proxy is dead, remove it from list"
           @proxies[proxy.index] = nil
         else
-          puts "#{@port}: Souce ready? #{proxy.source_ready}"
+          # puts "#{@port}: (#{proxy.index}) Source ready? #{proxy.source_ready}"
         end
       end
     end
+  end
+  
+  def terminate_remote(proxy)
+    puts "#{@port}: Sending shutdown for #{proxy.index}"
+    @command.write("S%06d\n" % proxy.index)
+    @command.flush
   end
 
   def run
@@ -139,7 +149,7 @@ class CommandSocket
             break
           end
 
-          # puts "Received command #{cmd}"
+          puts "#{@port}: Received command #{cmd}"
           oper, ind = cmd[0], cmd[1..-1].to_i
           case oper
           when ?S
