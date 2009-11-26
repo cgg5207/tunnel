@@ -32,7 +32,7 @@ class ProxyClient
       puts "Tunnel created, waiting for requests"
       begin
         while cmd = @command.read(8)
-          # puts "Received command #{cmd}"
+          puts "Received command #{cmd}"
         
           dest = source = proxy = nil
           oper, ind = cmd[0], cmd[1..-1].to_i
@@ -83,14 +83,12 @@ class ProxyClient
             exit(999)
 
           when ?S
-            # puts "Shutdown requestion on connection #{ind}"
+            puts "Shutdown request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
-              proxy.shudown
+              proxy.shutdown_read
             else
               puts "Cannot find proxy for #{ind}"
-            end
-
-          
+            end          
           else
             puts "Received bad command: #{cmd}"
           
@@ -106,7 +104,6 @@ class ProxyClient
         rescue
         end
       end
-      
 
       @proxies.values.each { |proxy| proxy.shutdown }
       @proxies.clear
@@ -119,6 +116,9 @@ class ProxyClient
   def shutdown_remote(proxy)
     # puts "#{proxy.index}: Sending proxy disconnect"
     @command.write("S%06d\n" % proxy.index)
+  end
+  
+  def terminate_remote(proxy) 
   end
 end
 
