@@ -79,7 +79,7 @@ class CommandSocket
       else
         @index += 1
         if @index > 50
-          shutdown
+          raise LeakError, "More than 50 proxies, shutting down"
         end
         source = nil
         Timeout::timeout(30) do
@@ -105,6 +105,10 @@ class CommandSocket
       puts "#{@port}: Server socket closed"
       shutdown
     end
+    
+  rescue Proxy::LeakError
+    puts "#{@port}: #{$!}"
+    shutdown
 
   rescue
     puts $!, $!.class
@@ -137,7 +141,7 @@ class CommandSocket
   
   def terminate_remote(proxy)
     puts "#{@port}: Sending shutdown for #{proxy.index}"
-    @command.write("S%06d\n" % proxy.index)
+    @command.write("T%06d\n" % proxy.index)
     @command.flush
   end
 
@@ -170,6 +174,15 @@ class CommandSocket
             else
               puts "#{@port}: Could not find proxy: #{ind}"
             end
+            
+          when ?T
+            puts "Shutdown request on connection #{ind}"
+            if !(proxy = @proxies[ind]).nil?
+              proxy.shutdown_read
+            else
+              puts "Cannot find proxy for #{ind}"
+            end          
+            
           else
             puts "#{@port}: Received invalid command #{oper}"
           end
@@ -220,90 +233,92 @@ class CommandSocket
 end
 
 class Server
-  def initialize(port)
-    @port = port
-    @server = TCPServer.new(port)
-    @server.listen(10)
+  def initialize(ports)
+    @ports = ports
+    @servers = ports.map { |port| TCPServer.new(port) }
+    @servers.each { |s| s.listen(10) }
     @clients = Hash.new
   end
 
   def accept
-    puts "Waiting on #{@port}"
     while true
-      puts "Accepting..."
-      s = nil
-      begin
-        s = @server.accept_nonblock
-        if FILTER[s.peeraddr[3]]
-          puts "**** Filter out connection request from #{s.peeraddr[3]}"
-          s.close
-          next
-        end
-      rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
-        puts "Waiting for connection request"
-        IO.select([@server])
-        retry
-      end
-      puts "Reading..."
-      cmd = ''
-      begin
-        while cmd.length < 8 
-          puts "Read nonblock"
-          cmd << s.read_nonblock(8 - cmd.length)
-          puts "CMD: #{cmd}"
-        end
-      rescue Errno::EAGAIN, Errno::EWOULDBLOCK
-        puts "CMD: #{$!}"
-        if IO.select([s], nil, nil, 3)  
-          retry
-        else
-          puts "Read timed out: #{s.peeraddr.inspect}"
-        end
-      rescue
-        puts "Accept: #{$!}"
-      end
-
-      puts "Received command #{cmd}"
-      if cmd !~ /[CP]\d{6}\n/
-        puts "bad connection request: #{cmd.inspect}"
-        s.close
-      else
-        oper, port = cmd[0], cmd[1..-1].to_i
-        if oper == ?C
-          if port.nil? or port.to_i < 1025
-            puts "Received bad port: #{port}"
+      puts "Accepting... #{@ports.join(', ')}"
+      servers, = IO.select(@servers)
+      next unless servers
+      servers.each do |server|
+        s = nil
+        begin
+          s = server.accept_nonblock
+          if FILTER[s.peeraddr[3]]
+            puts "**** Filter out connection request from #{s.peeraddr[3]}"
+            s.close
             next
           end
-
-          client = @clients[port]
-          if client
-            if client.same_peer?(s)
-              client.shutdown
-              sleep 1
-            else
-              puts "Could not create proxy server"
-              s.write("F0000001\n")
-              s.shutdown
-            end
-          else
-            puts "Creating proxy server on port #{port}"
-            client = CommandSocket.new(s, self, port)
-            if client.create_proxy(port.to_i)
-              @clients[port] = client
-              client.run
-            else
-              puts "Could not create proxy server for #{port}"
-              s.write("F0000001\n")
-              s.shutdown
-            end
+        rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
+          puts "Accept was blocked, waiting again."
+          next
+        end
+        puts "Reading..."
+        cmd = ''
+        begin
+          while cmd.length < 8 
+            puts "Read nonblock"
+            cmd << s.read_nonblock(8 - cmd.length)
+            puts "CMD: #{cmd}"
           end
-
-        elsif oper == ?P
-          client = @clients[port]
-          if client and client.same_peer?(s)
-            client.add_socket(s)
+        rescue Errno::EAGAIN, Errno::EWOULDBLOCK
+          puts "CMD: #{$!}"
+          if IO.select([s], nil, nil, 3)  
+            retry
           else
-            puts "Could not find client for #{port}"
+            puts "Read timed out: #{s.peeraddr.inspect}"
+          end
+        rescue
+          puts "Accept: #{$!}"
+        end
+
+        puts "Received command #{cmd}"
+        if cmd !~ /[CP]\d{6}\n/
+          puts "bad connection request: #{cmd.inspect}"
+          s.close
+        else
+          oper, port = cmd[0], cmd[1..-1].to_i
+          if oper == ?C
+            if port.nil? or port.to_i < 1025
+              puts "Received bad port: #{port}"
+              next
+            end
+
+            client = @clients[port]
+            if client
+              if client.same_peer?(s)
+                client.shutdown
+                sleep 1
+              else
+                puts "Could not create proxy server"
+                s.write("F0000001\n")
+                s.shutdown
+              end
+            else
+              puts "Creating proxy server on port #{port}"
+              client = CommandSocket.new(s, self, port)
+              if client.create_proxy(port.to_i)
+                @clients[port] = client
+                client.run
+              else
+                puts "Could not create proxy server for #{port}"
+                s.write("F0000001\n")
+                s.shutdown
+              end
+            end
+
+          elsif oper == ?P
+            client = @clients[port]
+            if client and client.same_peer?(s)
+              client.add_socket(s)
+            else
+              puts "Could not find client for #{port}"
+            end
           end
         end
       end
@@ -328,7 +343,7 @@ if ARGV.length < 1
   exit 999
 end
 
-server = Server.new(ARGV[0].to_i)
+server = Server.new(ARGV.map { |p| p.to_i })
 server.accept
 
 

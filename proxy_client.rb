@@ -82,7 +82,7 @@ class ProxyClient
             @command.shutdown rescue
             exit(999)
 
-          when ?S
+          when ?T
             puts "Shutdown request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
               proxy.shutdown_read
@@ -119,6 +119,9 @@ class ProxyClient
   end
   
   def terminate_remote(proxy) 
+    puts "#{@port}: Sending shutdown for #{proxy.index}"
+    @command.write("T%06d\n" % proxy.index)
+    @command.flush
   end
 end
 
