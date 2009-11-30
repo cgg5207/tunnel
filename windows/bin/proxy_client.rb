@@ -82,7 +82,7 @@ class ProxyClient
             @command.shutdown rescue
             exit(999)
 
-          when ?S
+          when ?T
             puts "Shutdown request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
               proxy.shutdown_read
@@ -93,7 +93,10 @@ class ProxyClient
             puts "Received bad command: #{cmd}"
           
             # Try to recover
-            while @command.read(1) != "\n"; end
+            begin
+              @command.read_nonblock(1000)
+            rescue Errno::EAGAIN, Errno::EWOULDBLOCK
+            end
           end
         end
       rescue 
@@ -116,9 +119,13 @@ class ProxyClient
   def shutdown_remote(proxy)
     # puts "#{proxy.index}: Sending proxy disconnect"
     @command.write("S%06d\n" % proxy.index)
+    @command.flush
   end
   
   def terminate_remote(proxy) 
+    puts "#{@port}: Sending shutdown for #{proxy.index}"
+    @command.write("T%06d\n" % proxy.index)
+    @command.flush
   end
 end
 

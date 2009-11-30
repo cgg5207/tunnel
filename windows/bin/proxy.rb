@@ -8,6 +8,9 @@ class Proxy
   class DestError < StandardError
   end
   
+  class LeakError < StandardError
+  end
+
   def set_options(sock)
     sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
     sock.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
