@@ -255,7 +255,7 @@ class Server
             next
           end
         rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
-          puts "Accept was blocked, waiting again."
+          puts "Accept was blocked, skip for now."
           next
         end
         puts "Reading..."
