@@ -2,6 +2,9 @@ require 'socket'
 require 'thread'
 
 class Proxy
+  # A proxy is stale after 10 minutes of non-use
+  STALE_PROXY = 600
+  
   attr_reader :index, :source, :dest, :dead
   attr_accessor :source_ready, :terminated
 
@@ -27,6 +30,7 @@ class Proxy
     @pull_state = "NEW"
     @push_state = "NEW"
     @state = "NEW"
+    @last_read = @last_write = Time.now
 
     @mutex = Mutex.new
 
@@ -56,6 +60,7 @@ class Proxy
             break
           end
           
+          @last_read = Time.now
           data ||= ''
           data << block
           next if data.length < TERM_LENGTH
@@ -144,6 +149,7 @@ class Proxy
           puts "#{@index}: Push received: #{data.length}" if VERBOSE
           @push_state = "WRITING"
           @source.write(data)
+          @last_write = Time.now
           
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
           puts "#{@index}: EAGAIN (push)" if VERBOSE
@@ -349,5 +355,12 @@ class Proxy
     flush_source
     @delegate.shutdown_remote(self)
     @state = "SHUTDOWN"
+  end
+  
+  # Determine if this proxy connection is stale. We will reap stale connections since
+  # they might be broken
+  def old?
+    now = Time.now
+    (now - @last_read) >= STALE_PROXY && (now - @last_write) >= STALE_PROXY
   end
 end

@@ -85,10 +85,15 @@ class ProxyClient
           when ?T
             puts "Shutdown request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
-              proxy.shutdown_read
+              proxy.shutdown
             else
               puts "Cannot find proxy for #{ind}"
-            end          
+            end
+            
+          when ?P
+            puts "Received a PING"
+            send_heartbeat
+            
           else
             puts "Received bad command: #{cmd}"
           
@@ -114,6 +119,11 @@ class ProxyClient
       puts "Server disconnected... waiting 10 seconds and try to connect"
       sleep 10
     end
+  end
+  
+  def send_heartbeat
+    @command.write("PONG   \n")
+    @last_heartbeat = Time.now
   end
 
   def shutdown_remote(proxy)

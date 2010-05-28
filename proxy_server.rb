@@ -52,6 +52,12 @@ class CommandSocket
     puts "Cannot create server port"
     false
   end
+  
+  def reap_proxies
+    @proxies.each do |key, proxy|
+      terminate_remote(proxy) if proxy.old?
+    end
+  end
 
   def send_client_connect(index)
     puts "Asking client to connect to #{index}"
@@ -77,8 +83,10 @@ class CommandSocket
       if proxy
         send_client_connect(proxy.index)
       else
-        @index += 1
-        if @index > 50
+        # Recycle open proxy indexes
+        index, = @proxies.find { |k, v| v.nil? }
+        index = @index += 1 unless index
+        if index > 50
           raise LeakError, "More than 50 proxies, shutting down"
         end
         source = nil
@@ -86,7 +94,7 @@ class CommandSocket
           send_client_connect(@index)
           source = @@socket_queue.pop
         end
-        proxy = @proxies[@index] = Proxy.new(source, self, @index)
+        proxy = @proxies[index] = Proxy.new(source, self, index)
       end
 
       puts "#{@port}: Connecting proxy for #{proxy.index}"
@@ -144,11 +152,25 @@ class CommandSocket
     @command.write("T%06d\n" % proxy.index)
     @command.flush
   end
+  
+  def send_heartbeat
+    @command.write("PING   \n")
+    @command.flush
+    @last_heartbeat = Time.now
+  end
 
   def run
     @cmd_thread = Thread.new do
       begin
+        send_heartbeat
         while @active
+          # Heartbeat the command socket every 10 seconds
+          socks = IO.select([@command], nil, nil, 10.0)
+          unless socks
+            send_heartbeat
+            reap_proxies
+            next
+          end
           cmd = @command.read(8)
           if cmd.nil? or cmd.length == 0
             shutdown
@@ -178,10 +200,14 @@ class CommandSocket
           when ?T
             puts "Shutdown request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
-              proxy.shutdown_read
+              proxy.shutdown
             else
               puts "Cannot find proxy for #{ind}"
             end          
+            
+          when ?P
+            puts "Received a pong"
+            @last_pong = Time.now
             
           else
             puts "#{@port}: Received invalid command #{oper}"
