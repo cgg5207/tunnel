@@ -55,7 +55,7 @@ class CommandSocket
   
   def reap_proxies
     @proxies.each do |key, proxy|
-      terminate_remote(proxy) if proxy.old?
+      terminate_remote(proxy) if proxy and proxy.old?
     end
   end
 
@@ -72,6 +72,7 @@ class CommandSocket
 
     begin
       proxy = nil
+      puts "Proxy accept: waiting for mutex"
       @mutex.synchronize do
         puts "#{@port}: #{@available_proxies.length} proxies available"
         if VERBOSE
@@ -91,7 +92,7 @@ class CommandSocket
         end
         source = nil
         Timeout::timeout(30) do
-          send_client_connect(@index)
+          send_client_connect(index)
           source = @@socket_queue.pop
         end
         proxy = @proxies[index] = Proxy.new(source, self, index)
@@ -148,9 +149,15 @@ class CommandSocket
   end
   
   def terminate_remote(proxy)
-    puts "#{@port}: Sending shutdown for #{proxy.index}"
-    @command.write("T%06d\n" % proxy.index)
-    @command.flush
+    @mutex.synchronize do
+      puts "#{@port}: Sending shutdown for #{proxy.index}"
+      @command.write("T%06d\n" % proxy.index)
+      @command.flush
+    
+      # Removing from active list and pool
+      @proxies[proxy.index] = nil
+      @available_proxies.delete(proxy)
+    end
   end
   
   def send_heartbeat
@@ -198,7 +205,7 @@ class CommandSocket
             end
             
           when ?T
-            puts "Shutdown request on connection #{ind}"
+            puts "Terminate request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
               proxy.shutdown
             else
@@ -246,7 +253,7 @@ class CommandSocket
     puts " #{@port}: shutting down"
     @command.shutdown rescue puts "Command: #{$!}"
     @proxy.close rescue puts "Proxy: #{$!}"
-    @proxies.values.each { |p| p.shutdown }
+    @proxies.values.each { |p| p.shutdown if p }
 
     @accept.kill unless Thread.current == @accept
     @cmd_thread.kill unless Thread.current == @cmd_thread

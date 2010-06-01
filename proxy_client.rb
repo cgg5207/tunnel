@@ -83,9 +83,10 @@ class ProxyClient
             exit(999)
 
           when ?T
-            puts "Shutdown request on connection #{ind}"
+            puts "Terminate request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
               proxy.shutdown
+              @proxies[proxy.index] = nil
             else
               puts "Cannot find proxy for #{ind}"
             end
@@ -113,7 +114,7 @@ class ProxyClient
         end
       end
 
-      @proxies.values.each { |proxy| proxy.shutdown }
+      @proxies.values.each { |proxy| proxy.shutdown if proxy }
       @proxies.clear
       
       puts "Server disconnected... waiting 10 seconds and try to connect"
