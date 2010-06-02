@@ -3,7 +3,7 @@ require 'thread'
 
 class Proxy
   # A proxy is stale after 10 minutes of non-use
-  STALE_PROXY = 20 # 600
+  STALE_PROXY = 600
   
   attr_reader :index, :source, :dest, :dead
   attr_accessor :source_ready, :terminated

@@ -169,6 +169,7 @@ class CommandSocket
   def run
     @cmd_thread = Thread.new do
       begin
+        last_received = Time.now
         send_heartbeat
         while @active
           # Heartbeat the command socket every 10 seconds
@@ -176,13 +177,24 @@ class CommandSocket
           unless socks
             send_heartbeat
             reap_proxies
-            next
+            
+            # Check if client has not sent a message for 30 seconds
+            # Shutdown the connection in this case
+            if Time.now - last_received > 30.0
+              puts "We have not received a command in 30 seconds"
+              shutdown
+              break
+            else
+              next
+            end
           end
           cmd = @command.read(8)
           if cmd.nil? or cmd.length == 0
             shutdown
             break
           end
+          
+          last_received = Time.now
 
           puts "#{@port}: Received command #{cmd}"
           oper, ind = cmd[0], cmd[1..-1].to_i
@@ -213,8 +225,7 @@ class CommandSocket
             end          
             
           when ?P
-            puts "Received a pong"
-            @last_pong = Time.now
+            puts "Received a pong" if VERBOSE
             
           else
             puts "#{@port}: Received invalid command #{oper}"

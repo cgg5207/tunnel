@@ -31,7 +31,16 @@ class ProxyClient
       
       puts "Tunnel created, waiting for requests"
       begin
-        while cmd = @command.read(8)
+        while true
+          socks = IO.select([@command], nil, nil, 30.0)
+          unless socks
+            # If we have not received a command (hearbeat) in 30 seconds
+            # the server is unresponsive. Shutdown and try reconnecting.
+            raise "Server not communicating for 30 seconds"
+          end
+          
+          cmd = @command.read(8)
+          break unless cmd
           puts "Received command #{cmd}"
         
           dest = source = proxy = nil
