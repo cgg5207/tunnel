@@ -31,7 +31,16 @@ class ProxyClient
       
       puts "Tunnel created, waiting for requests"
       begin
-        while cmd = @command.read(8)
+        while true
+          socks = IO.select([@command], nil, nil, 30.0)
+          unless socks
+            # If we have not received a command (hearbeat) in 30 seconds
+            # the server is unresponsive. Shutdown and try reconnecting.
+            raise "Server not communicating for 30 seconds"
+          end
+          
+          cmd = @command.read(8)
+          break unless cmd
           puts "Received command #{cmd}"
         
           dest = source = proxy = nil
@@ -83,12 +92,18 @@ class ProxyClient
             exit(999)
 
           when ?T
-            puts "Shutdown request on connection #{ind}"
+            puts "Terminate request on connection #{ind}"
             if !(proxy = @proxies[ind]).nil?
-              proxy.shutdown_read
+              proxy.shutdown
+              @proxies[proxy.index] = nil
             else
               puts "Cannot find proxy for #{ind}"
-            end          
+            end
+            
+          when ?P
+            puts "Received a PING"
+            send_heartbeat
+            
           else
             puts "Received bad command: #{cmd}"
           
@@ -108,12 +123,17 @@ class ProxyClient
         end
       end
 
-      @proxies.values.each { |proxy| proxy.shutdown }
+      @proxies.values.each { |proxy| proxy.shutdown if proxy }
       @proxies.clear
       
       puts "Server disconnected... waiting 10 seconds and try to connect"
       sleep 10
     end
+  end
+  
+  def send_heartbeat
+    @command.write("PONG   \n")
+    @last_heartbeat = Time.now
   end
 
   def shutdown_remote(proxy)
