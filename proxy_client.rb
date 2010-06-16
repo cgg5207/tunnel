@@ -41,7 +41,7 @@ class ProxyClient
           
           cmd = @command.read(8)
           break unless cmd
-          puts "Received command #{cmd}"
+          puts "Received command #{cmd}" if VERBOSE
         
           dest = source = proxy = nil
           oper, ind = cmd[0], cmd[1..-1].to_i
@@ -56,7 +56,7 @@ class ProxyClient
                 proxy = @proxies[ind] = Proxy.new(source, self, ind)
                 dest = TCPSocket.new(@local, @local_port)
               else
-                puts "Recycling old proxy: #{ind}"
+                puts "Recycling old proxy: #{ind}" if VERBOSE
                 dest = TCPSocket.new(@local, @local_port)
               end
 
@@ -92,7 +92,7 @@ class ProxyClient
             exit(999)
 
           when ?T
-            puts "Terminate request on connection #{ind}"
+            puts "Terminate request on connection #{ind}"  if VERBOSE
             if !(proxy = @proxies[ind]).nil?
               proxy.shutdown
               @proxies[proxy.index] = nil
@@ -101,7 +101,7 @@ class ProxyClient
             end
             
           when ?P
-            puts "Received a PING"
+            puts "Received a PING" if VERBOSE
             send_heartbeat
             
           else
@@ -143,7 +143,7 @@ class ProxyClient
   end
   
   def terminate_remote(proxy) 
-    puts "#{@port}: Sending shutdown for #{proxy.index}"
+    puts "#{@port}: Sending shutdown for #{proxy.index}"  if VERBOSE
     @command.write("T%06d\n" % proxy.index)
     @command.flush
   end

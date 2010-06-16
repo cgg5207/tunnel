@@ -60,7 +60,7 @@ class CommandSocket
   end
 
   def send_client_connect(index)
-    puts "Asking client to connect to #{index}"
+    puts "Asking client to connect to #{index}"  if VERBOSE
     unless @command.write("C%06d\n" % index)
       shutdown
       raise "Write failed, shutting down"
@@ -72,10 +72,9 @@ class CommandSocket
 
     begin
       proxy = nil
-      puts "Proxy accept: waiting for mutex"
       @mutex.synchronize do
-        puts "#{@port}: #{@available_proxies.length} proxies available"
         if VERBOSE
+          puts "#{@port}: #{@available_proxies.length} proxies available"
           puts "#{@port}: All: #{@proxies.values.join(',' )}"
           puts "#{@port}: Available: #{@available_proxies.join(',' )}"
         end
@@ -135,14 +134,14 @@ class CommandSocket
         raise "#{@port}: ********* Can't add proxy when dest is set! ********"
       end
       if proxy.source_ready and !proxy.dead and !@available_proxies.include?(proxy) and @active
-        puts "#{@port}: (#{proxy.index}) Adding to available pool"
+        puts "#{@port}: (#{proxy.index}) Adding to available pool" if VERBOSE
         @available_proxies << proxy
       else
         if proxy.dead
-          puts "#{@port}: (#{proxy.index}) Proxy is dead, remove it from list"
+          puts "#{@port}: (#{proxy.index}) Proxy is dead, remove it from list" if VERBOSE
           @proxies[proxy.index] = nil
         else
-          # puts "#{@port}: (#{proxy.index}) Source ready? #{proxy.source_ready}"
+          puts "#{@port}: (#{proxy.index}) Source ready? #{proxy.source_ready}" if VERBOSE
         end
       end
     end
@@ -150,7 +149,7 @@ class CommandSocket
   
   def terminate_remote(proxy)
     @mutex.synchronize do
-      puts "#{@port}: Sending shutdown for #{proxy.index}"
+      puts "#{@port}: Sending shutdown for #{proxy.index}" if VERBOSE
       @command.write("T%06d\n" % proxy.index)
       @command.flush
     
@@ -196,18 +195,20 @@ class CommandSocket
           
           last_received = Time.now
 
-          puts "#{@port}: Received command #{cmd}"
+          puts "#{@port}: Received command #{cmd}" if VERBOSE
           oper, ind = cmd[0], cmd[1..-1].to_i
           case oper
           when ?S
-            puts "#{@port}: returing #{ind} to available pool"
-            # puts "#{@port}: #{@proxies.values.join(',' )}"
+            if VERBOSE
+              puts "#{@port}: returing #{ind} to available pool"  
+              puts "#{@port}: #{@proxies.values.join(',' )}"
+            end
             proxy = @proxies[ind]
             if proxy
               @mutex.synchronize do
                 if proxy.dest.nil? and !proxy.dead
                   @available_proxies << proxy unless @available_proxies.include?(proxy)
-                  # puts "#{@port}: #{@available_proxies.length} proxies now available"
+                  puts "#{@port}: #{@available_proxies.length} proxies now available" if VERBOSE
                 else
                   proxy.source_ready = true
                 end
@@ -217,11 +218,11 @@ class CommandSocket
             end
             
           when ?T
-            puts "Terminate request on connection #{ind}"
+            puts "Terminate request on connection #{ind}" if VERBOSE
             if !(proxy = @proxies[ind]).nil?
               proxy.shutdown
             else
-              puts "Cannot find proxy for #{ind}"
+              puts "Terminate: Cannot find proxy for #{ind}"
             end          
             
           when ?P
@@ -286,7 +287,7 @@ class Server
 
   def accept
     while true
-      puts "Accepting... #{@ports.join(', ')}"
+      puts "Accepting... #{@ports.join(', ')}" if VERBOSE
       servers, = IO.select(@servers)
       next unless servers
       servers.each do |server|
@@ -299,19 +300,17 @@ class Server
             next
           end
         rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
-          puts "Accept was blocked, skip for now."
+          puts "Accept was blocked, skip for now." if VERBOSE
           next
         end
-        puts "Reading..."
         cmd = ''
         begin
           while cmd.length < 8 
-            puts "Read nonblock"
             cmd << s.read_nonblock(8 - cmd.length)
             puts "CMD: #{cmd}"
           end
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
-          puts "CMD: #{$!}"
+          puts "CMD: #{$!}" if VERBOSE
           if IO.select([s], nil, nil, 3)  
             retry
           else
@@ -321,7 +320,7 @@ class Server
           puts "Accept: #{$!}"
         end
 
-        puts "Received command #{cmd}"
+        puts "Received command #{cmd}" if VERBOSE
         if cmd !~ /[CP]\d{6}\n/
           puts "bad connection request: #{cmd.inspect}"
           s.close
@@ -344,7 +343,7 @@ class Server
                 s.shutdown
               end
             else
-              puts "Creating proxy server on port #{port}"
+              puts "Creating proxy server on port #{port}" if VERBOSE
               client = CommandSocket.new(s, self, port)
               if client.create_proxy(port.to_i)
                 @clients[port] = client
@@ -370,7 +369,7 @@ class Server
   end
 
   def remove_client(client)
-    puts "Removing client #{client.port}"
+    puts "Removing client #{client.port}" if VERBOSE
     @clients.delete(client.port)
   end
 end
