@@ -250,8 +250,6 @@ class CommandSocket
 
       puts "#{@port}: Exiting accept thread "
     end
-    
-    puts "Returning from run"
   end
 
   def shutdown
@@ -343,7 +341,7 @@ class Server
                 s.shutdown
               end
             else
-              puts "Creating proxy server on port #{port}" if VERBOSE
+              puts "Creating proxy server on port #{port}"
               client = CommandSocket.new(s, self, port)
               if client.create_proxy(port.to_i)
                 @clients[port] = client
