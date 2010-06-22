@@ -341,7 +341,7 @@ class Proxy
   end
 
   def shutdown_dest
-    puts "#{@index}: Active #{Time.now - @start} seconds" if @start
+    puts "#{@index}: Active #{Time.now - @start} seconds" if VERBOSE and @start
     dest = nil
     # puts "#{@index}: shutdown_dest waiting for mutex"
     @state = "SHUTDOWN - waiting"

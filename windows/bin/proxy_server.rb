@@ -307,10 +307,10 @@ class Server
         begin
           while cmd.length < 8 
             cmd << s.read_nonblock(8 - cmd.length)
-            puts "CMD: #{cmd}"
+            puts "CMD: #{cmd}" if VERBOSE
           end
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
-          puts "CMD: #{$!}" if VERBOSE
+          puts "CMD: #{$!}"
           if IO.select([s], nil, nil, 3)  
             retry
           else
