@@ -97,7 +97,7 @@ class CommandSocket
         proxy = @proxies[index] = Proxy.new(source, self, index)
       end
 
-      puts "#{@port}: Connecting proxy for #{proxy.index}"
+      puts "#{@port}: Connecting proxy for #{proxy.index}" if VERBOSE
 
       proxy.start
       proxy.dest = client
