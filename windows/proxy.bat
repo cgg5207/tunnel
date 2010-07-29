@@ -1,2 +1,2 @@
 
-bin\ruby -Ibin bin\proxy_client.rb emo.mtconnect.org 8080 %*
+bin\ruby -Ibin bin\proxy_client.rb demo.mtconnect.org 8080 %*
