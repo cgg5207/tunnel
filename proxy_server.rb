@@ -293,8 +293,8 @@ class Server
   def configure_ssl
     OpenSSL.debug = true if VERBOSE
     ca_cert  = OpenSSL::X509::Certificate.new(File.read("CA/cacert.pem"))
-    ssl_cert = OpenSSL::X509::Certificate.new(File.read("server/cert_server.pem")) 
-    ssl_key  = OpenSSL::PKey::RSA.new(File.read("server/server_keypair.pem")) { @password }
+    ssl_cert = OpenSSL::X509::Certificate.new(File.read("server/cert.pem"))
+    ssl_key  = OpenSSL::PKey::RSA.new(File.read("server/keypair.pem")) { @password }
 
     ctx = OpenSSL::SSL::SSLContext.new
     ctx.cert = ssl_cert

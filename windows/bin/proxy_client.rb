@@ -10,14 +10,13 @@ class ProxyClient
   def initialize(server, port, remote_port, local_host, local_port)
     @server, @port, @remote_port, @local, @local_port =
       server, port, remote_port, local_host, local_port
-
     @proxies = Hash.new
   end
   
   def configure_ssl
     OpenSSL.debug = true if VERBOSE
-    ssl_cert = OpenSSL::X509::Certificate.new(File.read("client/cert_client.pem"))
-    ssl_key  = OpenSSL::PKey::RSA.new(File.read("client/client_keypair.pem"))
+    ssl_cert = OpenSSL::X509::Certificate.new(File.read("client/cert.pem"))
+    ssl_key  = OpenSSL::PKey::RSA.new(File.read("client/keypair.pem"))
 
     ctx = OpenSSL::SSL::SSLContext.new
     ctx.cert = ssl_cert
@@ -180,7 +179,7 @@ else
 end
 
 if ARGV.length < 5
-  puts "Usage: proxy_client <remote_host> <remote_port> <remote_url_port> <local_host> <local_port> "
+  puts "Usage: proxy_client [-v] <remote_host> <remote_port> <remote_url_port> <local_host> <local_port> "
   exit 999
 end
 

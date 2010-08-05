@@ -1,5 +1,6 @@
 require 'socket'
 require 'thread'
+require 'zlib'
 
 class Proxy
   # A proxy is stale after 10 minutes of non-use
@@ -16,7 +17,7 @@ class Proxy
 
   def set_options(sock)
     sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
-    sock.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
+    sock.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)
   end
   
   def initialize(source, delegate, index)
@@ -33,8 +34,11 @@ class Proxy
     @last_read = @last_write = Time.now
 
     @mutex = Mutex.new
-
     set_options(@source)
+    
+    # Create compressors and decompressors for streaming data... 
+    @input_stream = Zlib::Inflate.new
+    @output_stream = Zlib::Deflate.new
   end
 
   def to_s
@@ -53,8 +57,10 @@ class Proxy
       while !stopped and !@shutting_down and IO.select([@source])
         begin
           @pull_state = "READING"
-          block = @source.sysread(1440)
-          puts "Pull received: #{block.length}" if VERBOSE
+          raw = @source.sysread(4096)
+          puts "Pull received compressed: #{raw.length}" if VERBOSE
+          block = @input_stream.inflate(raw)
+          puts "Pull received decompressed: #{block.length}" if VERBOSE
           unless block and !block.empty?
             puts "#{@index}: read returned no data"
             break
@@ -137,7 +143,7 @@ class Proxy
           @mutex.synchronize do
             break unless @dest
             @push_state = "READING"
-            data = @dest.read_nonblock(1440)
+            data = @dest.read_nonblock(10240)
           end
           
           unless data and !data.empty?
@@ -148,7 +154,7 @@ class Proxy
           
           puts "#{@index}: Push received: #{data.length}" if VERBOSE
           @push_state = "WRITING"
-          @source.write(data)
+          @source.write(@output_stream.deflate(data, Zlib::SYNC_FLUSH))
           @last_write = Time.now
           
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
@@ -205,7 +211,7 @@ class Proxy
     
     @push_state = "WRITING TERMINATOR"
     puts "#{@index}: Writing terminator..." if VERBOSE
-    @source.write(TERMINATOR)
+    @source.write(@output_stream.deflate(TERMINATOR, Zlib::SYNC_FLUSH))
     @push_state = "FLUSHING SOURCE"
     @source.flush
             
