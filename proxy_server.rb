@@ -277,9 +277,10 @@ class CommandSocket
 end
 
 class Server
-  def initialize(ports)
+  def initialize(password, ports)
     Socket.do_not_reverse_lookup = true
     @ports = ports
+    @password = password
     @ssl_ctx = configure_ssl
     @servers = ports.map { |port| 
       OpenSSL::SSL::SSLServer.new(TCPServer.new(port), @ssl_ctx) 
@@ -292,8 +293,8 @@ class Server
   def configure_ssl
     OpenSSL.debug = true if VERBOSE
     ca_cert  = OpenSSL::X509::Certificate.new(File.read("CA/cacert.pem"))
-    ssl_cert = OpenSSL::X509::Certificate.new(File.read("server/cert_server.pem"))
-    ssl_key  = OpenSSL::PKey::RSA.new(File.read("server/server_keypair.pem"))
+    ssl_cert = OpenSSL::X509::Certificate.new(File.read("server/cert_server.pem")) 
+    ssl_key  = OpenSSL::PKey::RSA.new(File.read("server/server_keypair.pem")) { @password }
 
     ctx = OpenSSL::SSL::SSLContext.new
     ctx.cert = ssl_cert
@@ -306,6 +307,7 @@ class Server
   end
 
   def accept
+    puts "Starting Accept Loop"
     while true
       puts "Accepting... #{@ports.join(', ')}" if VERBOSE
       servers, = IO.select(@servers)
@@ -313,7 +315,9 @@ class Server
       servers.each do |server|
         s = nil
         begin
-          s = server.accept 
+          Timeout::timeout(3) do
+            s = server.accept 
+          end
           if FILTER[s.peeraddr[3]]
             puts "**** Filter out connection request from #{s.peeraddr[3]}"
             s.close
@@ -325,6 +329,8 @@ class Server
         rescue OpenSSL::SSL::SSLError
           puts "SSL Authentication failed #{$!}"
           next
+        rescue Timeout::Error
+          puts "SSL Accept timed out... SSL Connection not established"
         end
         cmd = ''
         begin
@@ -404,12 +410,13 @@ else
   VERBOSE = false
 end
 
-if ARGV.length < 1
-  puts "Usage: proxy_server <port>"
+if ARGV.length < 2
+  puts "Usage: proxy_server <SSL Password> <port>"
   exit 999
 end
 
-server = Server.new(ARGV.map { |p| p.to_i })
+password = ARGV.shift
+server = Server.new(password, ARGV.map { |p| p.to_i })
 server.accept
 
 
