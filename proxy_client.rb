@@ -2,6 +2,7 @@
 require 'socket'
 require 'proxy'
 require 'timeout'
+require 'openssl'
 
 STDOUT.sync = true
 
@@ -12,15 +13,35 @@ class ProxyClient
 
     @proxies = Hash.new
   end
+  
+  def configure_ssl
+    OpenSSL.debug = true
+    ssl_cert = OpenSSL::X509::Certificate.new(File.read("client/cert_client.pem"))
+    ssl_key  = OpenSSL::PKey::RSA.new(File.read("client/client_keypair.pem"))
+
+    ctx = OpenSSL::SSL::SSLContext.new
+    ctx.cert = ssl_cert
+    ctx.key = ssl_key
+    ctx.ca_file = "CA/cacert.pem"
+    ctx.verify_mode = OpenSSL::SSL::VERIFY_PEER
+    
+    ctx
+  end
 
   def run
+    @ssl_ctx = configure_ssl
+    
     while true
       begin
         Timeout::timeout(10) do
           puts "Opening connect to server #{@server} on #{@port}"
-          @command = TCPSocket.new(@server, @port)
+          @socket = TCPSocket.new(@server, @port)
         end
-        @command.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
+        @socket.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)  
+        @command = OpenSSL::SSL::SSLSocket.new(@socket, @ssl_ctx)
+        @command.sync_close = true        
+        @command.connect
+          
         @command.write("C%06d\n" % @remote_port)
       rescue
         puts $!
@@ -50,7 +71,9 @@ class ProxyClient
             begin
               if (proxy = @proxies[ind]).nil?
                 puts "Proxying(#{ind}) from #{@local}:#{@local_port} to #{@server}:#{@port}"
-                source = TCPSocket.new(@server, @port)
+                source = OpenSSL::SSL::SSLSocket.new(TCPSocket.new(@server, @port), @ssl_ctx)
+                source.sync_close = true        
+                source.connect                
                 source.write("P%06d\n" % @remote_port)
               
                 proxy = @proxies[ind] = Proxy.new(source, self, ind)
@@ -109,7 +132,7 @@ class ProxyClient
           
             # Try to recover
             begin
-              @command.read_nonblock(1000)
+              @command.sysread(1000)
             rescue Errno::EAGAIN, Errno::EWOULDBLOCK
             end
           end
@@ -118,7 +141,7 @@ class ProxyClient
         puts "Error: #{$!}"
         puts "Disconnected"
         begin
-          @command.shutdown
+          @command.close
         rescue
         end
       end

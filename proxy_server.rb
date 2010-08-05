@@ -15,6 +15,7 @@ require 'socket'
 require 'proxy'
 require 'thread'
 require 'timeout'
+require 'openssl'
 
 STDOUT.sync = true
 
@@ -261,7 +262,7 @@ class CommandSocket
     @server.remove_client(self)
 
     puts " #{@port}: shutting down"
-    @command.shutdown rescue puts "Command: #{$!}"
+    @command.sysclose rescue puts "Command: #{$!}"
     @proxy.close rescue puts "Proxy: #{$!}"
     @proxies.values.each { |p| p.shutdown if p }
 
@@ -277,10 +278,31 @@ end
 
 class Server
   def initialize(ports)
+    Socket.do_not_reverse_lookup = true
     @ports = ports
-    @servers = ports.map { |port| TCPServer.new(port) }
+    @ssl_ctx = configure_ssl
+    @servers = ports.map { |port| 
+      OpenSSL::SSL::SSLServer.new(TCPServer.new(port), @ssl_ctx) 
+    }
+    @servers.each { |server| server.start_immediately = true }
     @servers.each { |s| s.listen(10) }
     @clients = Hash.new
+  end
+  
+  def configure_ssl
+    OpenSSL.debug = true
+    ca_cert  = OpenSSL::X509::Certificate.new(File.read("CA/cacert.pem"))
+    ssl_cert = OpenSSL::X509::Certificate.new(File.read("server/cert_server.pem"))
+    ssl_key  = OpenSSL::PKey::RSA.new(File.read("server/server_keypair.pem"))
+
+    ctx = OpenSSL::SSL::SSLContext.new
+    ctx.cert = ssl_cert
+    ctx.key = ssl_key
+    ctx.client_ca = ca_cert
+    ctx.ca_file = "CA/cacert.pem"
+    ctx.verify_mode = OpenSSL::SSL::VERIFY_PEER | OpenSSL::SSL::VERIFY_FAIL_IF_NO_PEER_CERT
+    
+    ctx
   end
 
   def accept
@@ -291,7 +313,7 @@ class Server
       servers.each do |server|
         s = nil
         begin
-          s = server.accept_nonblock
+          s = server.accept 
           if FILTER[s.peeraddr[3]]
             puts "**** Filter out connection request from #{s.peeraddr[3]}"
             s.close
@@ -300,11 +322,14 @@ class Server
         rescue Errno::EAGAIN, Errno::ECONNABORTED, Errno::EPROTO, Errno::EINTR
           puts "Accept was blocked, skip for now." if VERBOSE
           next
+        rescue OpenSSL::SSL::SSLError
+          puts "SSL Authentication failed #{$!}"
+          next
         end
         cmd = ''
         begin
           while cmd.length < 8 
-            cmd << s.read_nonblock(8 - cmd.length)
+            cmd << s.sysread(8 - cmd.length)
             puts "CMD: #{cmd}" if VERBOSE
           end
         rescue Errno::EAGAIN, Errno::EWOULDBLOCK
