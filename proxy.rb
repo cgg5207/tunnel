@@ -285,7 +285,7 @@ class Proxy
       puts "Flushed: #{data.inspect}" if data != TERMINATOR
       break if data.empty?
     end
-    puts "#{@index}: Completed flush"
+    puts "#{@index}: Completed flush" if VERBOSE
   rescue Errno::EAGAIN, Errno::EWOULDBLOCK, EOFError
   end
 

@@ -1,7 +1,7 @@
 #
 # tempfile - manipulates temporary files
 #
-# $Id: tempfile.rb 19833 2008-10-18 10:32:26Z matz $
+# $Id: tempfile.rb 24119 2009-07-15 11:57:41Z yugui $
 #
 
 require 'delegate'
@@ -136,7 +136,10 @@ class Tempfile < DelegateClass(File)
   def unlink
     # keep this order for thread safeness
     begin
-      File.unlink(@tmpname) if File.exist?(@tmpname)
+      if File.exist?(@tmpname)
+        closed? or close
+        File.unlink(@tmpname)
+      end
       @@cleanlist.delete(@tmpname)
       @data = @tmpname = nil
       ObjectSpace.undefine_finalizer(self)
@@ -187,7 +190,7 @@ class Tempfile < DelegateClass(File)
     #
     # If a block is given, it will be passed tempfile as an argument,
     # and the tempfile will automatically be closed when the block
-    # terminates.  In this case, open() returns nil.
+    # terminates.  The call returns the value of the block.
     def open(*args)
       tempfile = new(*args)
 

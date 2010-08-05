@@ -22,7 +22,7 @@
 # http://www.ruby-lang.org/ja/man/html/net_http.html
 # 
 #--
-# $Id: http.rb 18805 2008-08-24 03:21:36Z naruse $
+# $Id: http.rb 25620 2009-11-01 15:48:31Z yugui $
 #++ 
 
 require 'net/protocol'
@@ -284,7 +284,7 @@ module Net   #:nodoc:
   class HTTP < Protocol
 
     # :stopdoc:
-    Revision = %q$Revision: 18805 $.split[1]
+    Revision = %q$Revision: 25620 $.split[1]
     HTTPVersion = '1.1'
     @newimpl = true
     begin
@@ -1289,11 +1289,12 @@ module Net   #:nodoc:
     end
 
     # Returns the header field corresponding to the case-insensitive key.
-    # Returns the default value +args+, or the result of the block, or nil,
-    # if there's no header field named key.  See Hash#fetch
+    # Returns the default value +args+, or the result of the block, or
+    # raises an IndexErrror if there's no header field named +key+
+    # See Hash#fetch
     def fetch(key, *args, &block)   #:yield: +key+
       a = @header.fetch(key.downcase, *args, &block)
-      a.join(', ')
+      a.kind_of?(Array) ? a.join(', ') : a
     end
 
     # Iterates for each header names and values.
@@ -1521,7 +1522,7 @@ module Net   #:nodoc:
     alias form_data= set_form_data
 
     def encode_kvpair(k, vs)
-      Array(vs).map {|v| "#{urlencode(k)}=#{urlencode(v.to_s)}" }
+      Array(vs).map {|v| "#{urlencode(k.to_s)}=#{urlencode(v.to_s)}" }
     end
     private :encode_kvpair
 

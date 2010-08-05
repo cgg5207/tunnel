@@ -15,7 +15,7 @@ class ProxyClient
   end
   
   def configure_ssl
-    OpenSSL.debug = true
+    OpenSSL.debug = true if VERBOSE
     ssl_cert = OpenSSL::X509::Certificate.new(File.read("client/cert_client.pem"))
     ssl_key  = OpenSSL::PKey::RSA.new(File.read("client/client_keypair.pem"))
 

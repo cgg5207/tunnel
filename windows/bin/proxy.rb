@@ -53,7 +53,7 @@ class Proxy
       while !stopped and !@shutting_down and IO.select([@source])
         begin
           @pull_state = "READING"
-          block = @source.read_nonblock(1440)
+          block = @source.sysread(1440)
           puts "Pull received: #{block.length}" if VERBOSE
           unless block and !block.empty?
             puts "#{@index}: read returned no data"
@@ -280,11 +280,12 @@ class Proxy
   end
 
   def flush_source
-    puts "#{@index}: Flushing source..." if VERBOSE
-    while data = @source.read_nonblock(1440)
+    puts "#{@index}: Flushing source... #{@source.pending} bytes pending" if VERBOSE
+    while @source.pending > 0 && data = @source.sysread(1440)
       puts "Flushed: #{data.inspect}" if data != TERMINATOR
       break if data.empty?
     end
+    puts "#{@index}: Completed flush" if VERBOSE
   rescue Errno::EAGAIN, Errno::EWOULDBLOCK, EOFError
   end
 

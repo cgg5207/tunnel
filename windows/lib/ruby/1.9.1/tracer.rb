@@ -125,7 +125,7 @@ class Tracer
       line,
       klass || '',
       EVENT_SYMBOL[event],
-      get_line(file, line))
+      line == 0 ? "?\n" : get_line(file, line))
     # Thread.critical = saved_crit
   end
 
@@ -161,6 +161,6 @@ if $0 == __FILE__
   ARGV.shift
   Tracer.on
   require $0
-elsif caller(0).size == 1
+elsif caller.size == 1
   Tracer.on
 end

@@ -1,7 +1,7 @@
 #
 # tmpdir - retrieve temporary directory path
 #
-# $Id: tmpdir.rb 19513 2008-09-24 05:39:39Z usa $
+# $Id: tmpdir.rb 23781 2009-06-21 09:14:14Z yugui $
 #
 
 require 'fileutils'
@@ -28,6 +28,7 @@ class Dir
       len = getdir.call(windir, windir.size)
       windir = File.expand_path(windir[0, len])
     end
+    windir.force_encoding(Dir.pwd.encoding)
     temp = File.join(windir.untaint, 'temp')
     @@systmpdir = temp if File.directory?(temp) and File.writable?(temp)
   rescue LoadError
