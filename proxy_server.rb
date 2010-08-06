@@ -331,6 +331,7 @@ class Server
           next
         rescue Timeout::Error
           puts "SSL Accept timed out... SSL Connection not established"
+          next
         end
         cmd = ''
         begin
