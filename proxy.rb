@@ -15,9 +15,9 @@ class Proxy
   end
 
   def set_options(sock)
-    nolinger = [1,0].pack "ii"
     sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
-    sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_LINGER, nolinger)
+    # nolinger = [1,0].pack "ii"
+    # sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_LINGER, nolinger)
     sock.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, true)    
   end
   
